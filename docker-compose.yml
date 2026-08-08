@@ -1,0 +1,49 @@
+# ============================================================================
+# docker-compose - loja-informatica-backend (app + Redis)
+#   App  : build local via Dockerfile multi-stage; le as variaveis do .env
+#          (copie o .env.example para .env e preencha as chaves).
+#   Redis: persistencia de sessao distribuida (SESSION_STORE=redis).
+#          Redireciona automaticamente o REDIS_URL para o servico `redis`.
+# Comandos:
+#   docker compose up --build -d   (sobe app + redis)
+#   docker compose down            (derruba)
+#   docker compose logs -f app     (acompanha logs)
+# ============================================================================
+
+name: loja-informatica
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "3000"
+      SESSION_STORE: "redis"
+      REDIS_URL: "redis://redis:6379"
+    ports:
+      - "${PORT:-3000}:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis-data:
