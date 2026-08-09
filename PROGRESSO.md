@@ -8,6 +8,7 @@ Guia de retomada: o que já está pronto e o que falta quando as chaves da API f
 - **Fase 2** — `ISessionStore` (`InMemorySessionStore` + `RedisSessionStore` com TTL 30 min), histórico recente da conversa (10 msgs), endpoints HTTP (`/health`, `/metrics`, `/webhooks/suri`, `/webhooks/payment`): concluída.
 - **Fase 3** — Dockerização (`Dockerfile` multi-stage + `docker-compose.yml` com Redis), `src/index.ts` (boot produção com validação Zod + Redis ping + shutdown gracioso), `scripts/check-env.ts`, README operacional, `PAYMENT_WEBHOOK_SECRET`: concluída.
 - **Fase 4** — CRM `trycompai/crm` (Backstage/Gestão de Oportunidades): `CrmClient` (ICrmClient, timeout rígido ≤3s, `CRM_ENABLED=false` = no-op), eventos Zod `lead.created` / `pix.generated` / `pix.expired` / `sale.completed` disparados de forma **assíncrona e não-bloqueante** (nunca travam a FSM), e webhook `POST /webhooks/crm/follow-up` para reengajamento via SURI: concluída.
+- **Preparação para apresentação** — Persona comercial profissional no `MessageHandler` (triagem → dúvidas → qualificação → oferta → handoff), base de FAQs (`src/rag/faq.ts` + `knowledge/faqs.json`) injetada no contexto do LLM, `.env` sincronizado com `.env.example`, e `.gitignore` ampliado (bloqueia `senhas servidor/`, arquivos `*.txt` e `.env`): concluída.
 
 Validação executada:
 - `npm run typecheck` ✓ · `npm test` (81/81) ✓ · `npm run build` ✓ · `npm run check:env` ✓

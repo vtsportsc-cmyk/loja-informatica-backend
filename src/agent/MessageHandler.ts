@@ -1,4 +1,5 @@
 import { KnowledgeBase } from '../rag/knowledgeBase.js';
+import { FaqService } from '../rag/faq.js';
 import { LLMProviderRouter } from '../llm/LLMProviderRouter.js';
 import type { LlmChatMessage, LlmToolCall } from '../llm/types.js';
 import { BotStateMachine } from '../fsm/BotStateMachine.js';
@@ -24,6 +25,8 @@ export interface MessageHandlerOptions {
   tools: AgentToolExecutor;
   sessionStore?: SessionStore;
   knowledgeBase?: KnowledgeBase;
+  /** Base de FAQs/politicas da loja injetada no contexto do LLM. */
+  faqService?: FaqService;
   /** Hook apos transicoes de FSM (ex.: gerar cobranca ao entrar em PAYMENT_PENDING). */
   onTransition?: (state: SessionState, fsm: BotStateMachine) => Promise<void> | void;
   /** Cliente CRM para eventos de ciclo de vida (lead.created); opcional. */
@@ -39,6 +42,7 @@ export class MessageHandler {
   private readonly tools: AgentToolExecutor;
   private readonly sessionStore: SessionStore;
   private readonly knowledgeBase: KnowledgeBase;
+  private readonly faqService: FaqService;
   private readonly onTransition?: MessageHandlerOptions['onTransition'];
   private readonly crmClient?: ICrmClient;
   private readonly maxToolRounds: number;
@@ -51,6 +55,7 @@ export class MessageHandler {
     this.tools = options.tools;
     this.sessionStore = options.sessionStore ?? new InMemorySessionStore();
     this.knowledgeBase = options.knowledgeBase ?? new KnowledgeBase();
+    this.faqService = options.faqService ?? new FaqService();
     this.onTransition = options.onTransition;
     this.crmClient = options.crmClient;
     this.maxToolRounds = options.maxToolRounds ?? MAX_TOOL_ROUNDS;
@@ -217,16 +222,25 @@ export class MessageHandler {
   private buildMessages(session: SessionState, inbound: SuriInbound): LlmChatMessage[] {
     const kbContext = this.buildKnowledgeContext(session);
     const customerText = inbound.message.text ?? '[media sem texto]';
+    const faqContext = this.buildFaqContext(customerText);
 
-    const system = `Voce e o assistente autonomo de uma loja de informatica no WhatsApp.
-Seu trabalho e 100% autonomo: consultar pecas, validar compatibilidade, calcular frete e gerar cobranca por PIX ou cartao de credito. Apenas em casos extremos, acione o vendedor humano.
-Tambem atende consultas de rastreamento: se o cliente perguntar o status de um pedido, use check_order_status com o ID informado.
+    const system = `Voce e o assistente comercial e de atendimento ao cliente da Loja de Informatica, atendendo pelo WhatsApp.
+Sua atuacao e profissional e orientada a vendas, com foco em: TRIAGEM da conversa, TIRADA DE DUVIDAS com clareza, QUALIFICACAO de leads (o que o cliente precisa, orcamento e urgencia) e ENCAMINHAMENTO para a equipe comercial quando necessario.
+
+Fluxo de atendimento:
+1. Faca a triagem e identifique a necessidade do cliente (identify_intent).
+2. Esclareca duvidas sobre produtos, compatibilidade, prazos, pagamento e servicos usando a base tecnica e os FAQs abaixo.
+3. Qualifique o lead: finalidade (jogos/trabalho/estudo), pecas desejadas, faixa de orcamento e urgencia.
+4. Faca a oferta: valide compatibilidade (check_hardware_compatibility), monte o carrinho com frete (calculate_cart) e feche com PIX ou cartao de credito.
+5. Encaminhe ao comercial (handoff) quando o cliente pedir, quando houver objecao que voce nao possa resolver, duvida juridica/contratual ou pedido de atendimento/agendamento presencial.
 
 Regras:
-- Responda sempre em portugues (pt-BR), de forma objetiva e cordial.
-- Para vender, use as ferramentas disponiveis: identify_intent, check_hardware_compatibility e calculate_cart.
-- Nao invente especificacoes: use apenas a base tecnica fornecida abaixo.
+- Responda sempre em portugues (pt-BR), cordial, objetivo e sem gírias.
+- Nunca invente especificacoes, precos ou promessas: use apenas a base tecnica e os FAQs fornecidos.
+- Qualifique perguntando 1 ou 2 coisas por vez; nao encha o cliente de perguntas.
+- Horario de atendimento, servicos, garantia e precos: responda com base nos FAQs.
 - Ao confirmar um pagamento, informe que a separacao e a emissao da NF serao feitas pelo vendedor.
+- Se o cliente perguntar o status de um pedido, use check_order_status com o ID informado.
 
 Contexto da sessao (ticket ${session.ticketId}):
 - Estado atual do atendimento: ${session.botState}
@@ -238,7 +252,10 @@ Contexto da sessao (ticket ${session.ticketId}):
 - Historico recente da conversa: ${session.recentMessages && session.recentMessages.length > 0 ? session.recentMessages.map((m) => `${m.role}: ${m.text}`).join(' | ') : '(sem historico)'}
 
 Base tecnica (RAG):
-${kbContext}`;
+${kbContext}
+
+FAQs / politicas da loja:
+${faqContext}`;
 
     return [
       { role: 'system', content: system },
@@ -265,6 +282,15 @@ ${kbContext}`;
       }
     }
     return lines.length ? lines.join('\n') : '(sem dados na base)';
+  }
+
+  /** Busca FAQs/politicas relevantes para o texto da mensagem do cliente. */
+  private buildFaqContext(query: string): string {
+    const hits = this.faqService.search(query, 3);
+    if (hits.length === 0) return '(nenhuma FAQ relacionada)';
+    return hits
+      .map((f) => `- [${f.category}] ${f.question} -> ${f.answer}`)
+      .join('\n');
   }
 
   /** Preenche dados de sessao ausentes na chamada de tool (fix: CEP do recalculo). */

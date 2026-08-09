@@ -5,3 +5,8 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# Credenciais de servidor / arquivos de senha NUNCA sao commitados
+senhas servidor/
+**/senhas*/
+*.txt
