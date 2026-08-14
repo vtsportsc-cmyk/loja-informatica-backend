@@ -79,6 +79,10 @@ AGENT_API_KEY=dev_agent_key
 STORE_WHATSAPP_NUMBER=5511999990000
 ```
 
+**Segurança do painel**: `/crm` e `/api/crm/*` são protegidos por HTTP Basic Auth
+(middleware Next.js). Em produção defina `CRM_PANEL_USERNAME` e `CRM_PANEL_PASSWORD`
+(senha forte). A troca exige rebuild do app (`npm run build -w @loja/app`).
+
 ## 4. Rodando em desenvolvimento
 
 ```bash
