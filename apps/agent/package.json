@@ -1,0 +1,32 @@
+{
+  "name": "@loja/agent",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Backend serverless + motor de automacao para loja de informatica (Evolution API WhatsApp, PIX, cartao, CRM e Bling)",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "tsx src/index.ts",
+    "check:env": "tsx scripts/check-env.ts",
+    "e2e": "tsx scripts/e2e-real.ts",
+    "start": "node dist/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@loja/db": "*",
+    "ioredis": "^6.0.0",
+    "openai": "^4.71.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}

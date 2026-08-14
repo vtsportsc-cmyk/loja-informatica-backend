@@ -10,3 +10,14 @@ coverage/
 senhas servidor/
 **/senhas*/
 *.txt
+
+# Prisma
+packages/db/prisma/*.db
+packages/db/prisma/dev.db
+*.sqlite3
+
+# Next.js
+apps/app/.next/
+apps/app/out/
+apps/app/next-env.d.ts
+*.tsbuildinfo

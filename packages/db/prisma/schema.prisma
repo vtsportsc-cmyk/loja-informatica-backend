@@ -1,0 +1,152 @@
+// Prisma schema do ecossistema da loja.
+// O mesmo banco e compartilhado entre apps/agent (Evolution API) e apps/app
+// (Monte seu PC + Painel CRM multi-atendente).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum FunnelStatus {
+  NOVO
+  MONTANDO_PC
+  EM_QUALIFICACAO
+  CARRINHO
+  PIX_GERADO
+  AGUARDANDO_NF
+  CONCLUIDO
+}
+
+model Customer {
+  id            String   @id @default(cuid())
+  whatsappId    String   @unique
+  name          String?
+  photoUrl      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  conversations Conversation[]
+  quotes        Quote[]
+  leads         Lead[]
+}
+
+model Agent {
+  id            String         @id @default(cuid())
+  name          String
+  role          String?
+  email         String?
+  avatarColor   String?
+  active        Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+
+  conversations Conversation[]
+  messages      Message[]
+}
+
+model Conversation {
+  id              String       @id @default(cuid())
+  customerId      String       @unique
+  customer        Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  funnelStatus    FunnelStatus @default(NOVO)
+  humanMode       Boolean      @default(false)
+  assignedAgentId String?
+  assignedAgent   Agent?       @relation(fields: [assignedAgentId], references: [id])
+  lastMessageAt   DateTime     @default(now())
+  unreadCount     Int          @default(0)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  messages Message[]
+  lead     Lead?
+  quote    Quote?
+
+  @@index([funnelStatus])
+  @@index([lastMessageAt])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  direction      String
+  type           String
+  text           String?
+  caption        String?
+  mediaUrl       String?
+  mediaMimeType  String?
+  agentId        String?
+  agent          Agent?       @relation(fields: [agentId], references: [id])
+  whatsappId     String?
+  status         String       @default("received")
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+model Quote {
+  id                   String       @id @default(cuid())
+  code                 String       @unique
+  customerId           String
+  customer             Customer     @relation(fields: [customerId], references: [id])
+  conversationId       String?      @unique
+  conversation         Conversation? @relation(fields: [conversationId], references: [id])
+  status               String       @default("pending")
+  totalCents           Int
+  discountCents        Int          @default(0)
+  pixTotalCents        Int
+  installments         Int          @default(1)
+  installmentValueCents Int         @default(0)
+  parceledTotalCents   Int
+  blingOrderId         String?
+  blingNumber          String?
+  blingStatus          String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  items     QuoteItem[]
+  lead      Lead?
+
+  @@index([createdAt])
+  @@index([customerId])
+}
+
+model QuoteItem {
+  id             String @id @default(cuid())
+  quoteId        String
+  quote          Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  category       String
+  name           String
+  brand          String
+  model          String
+  sku            String?
+  specSummary    String?
+  unitPriceCents Int
+  quantity       Int    @default(1)
+  sort           Int    @default(0)
+}
+
+model Lead {
+  id                   String       @id @default(cuid())
+  customerId           String?
+  customer             Customer?    @relation(fields: [customerId], references: [id])
+  conversationId       String?      @unique
+  conversation         Conversation? @relation(fields: [conversationId], references: [id])
+  quoteId              String?   @unique
+  quote                Quote?       @relation(fields: [quoteId], references: [id])
+  status               String       @default("NOVO")
+  source               String       @default("whatsapp")
+  name                 String?
+  phone                String?
+  intent               String?
+  estimatedValueCents  Int?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([customerId])
+}

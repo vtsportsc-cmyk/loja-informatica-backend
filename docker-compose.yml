@@ -1,37 +1,32 @@
 # ============================================================================
-# docker-compose - loja-informatica-backend (app + Redis)
-#   App  : build local via Dockerfile multi-stage; le as variaveis do .env
-#          (copie o .env.example para .env e preencha as chaves).
-#   Redis: persistencia de sessao distribuida (SESSION_STORE=redis).
-#          Redireciona automaticamente o REDIS_URL para o servico `redis`.
+# docker-compose do ecossistema LojaTech.
+#   db   : PostgreSQL (Prisma) - conversas, mensagens, orcamentos e funil de CRM
+#   redis: sessao distribuida do agente (SESSION_STORE=redis)
+#   agent: motor de atendimento (Evolution API WhatsApp, PIX, cartao, CRM, Bling)
+#   web  : Next.js - "Monte seu PC" + Painel CRM multi-atendente
 # Comandos:
-#   docker compose up --build -d   (sobe app + redis)
+#   docker compose up --build -d   (sobe tudo)
 #   docker compose down            (derruba)
-#   docker compose logs -f app     (acompanha logs)
+#   docker compose logs -f agent   (acompanha logs do agente)
 # ============================================================================
 
 name: loja-informatica
 
 services:
-  app:
-    build: .
+  db:
+    image: postgres:16-alpine
     restart: unless-stopped
-    env_file: .env
     environment:
-      PORT: "3000"
-      SESSION_STORE: "redis"
-      REDIS_URL: "redis://redis:6379"
-    ports:
-      - "${PORT:-3000}:3000"
-    depends_on:
-      redis:
-        condition: service_healthy
+      POSTGRES_USER: loja
+      POSTGRES_PASSWORD: loja
+      POSTGRES_DB: loja
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
-      interval: 30s
+      test: ["CMD-SHELL", "pg_isready -U loja -d loja"]
+      interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 15s
+      retries: 5
 
   redis:
     image: redis:7-alpine
@@ -45,5 +40,47 @@ services:
       timeout: 3s
       retries: 5
 
+  agent:
+    build:
+      context: .
+      dockerfile: apps/agent/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "3000"
+      DATABASE_URL: "postgresql://loja:loja@db:5432/loja?schema=public"
+      SESSION_STORE: "redis"
+      REDIS_URL: "redis://redis:6379"
+    ports:
+      - "${AGENT_PORT:-3000}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/app/Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      AGENT_API_URL: "http://agent:3000"
+      AGENT_API_KEY: "${AGENT_API_KEY:-dev_agent_key}"
+      STORE_WHATSAPP_NUMBER: "${STORE_WHATSAPP_NUMBER:-5511999990000}"
+    ports:
+      - "${APP_PORT:-3001}:3000"
+    depends_on:
+      agent:
+        condition: service_started
+
 volumes:
+  postgres-data:
   redis-data:

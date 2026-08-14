@@ -1,35 +1,36 @@
 {
-  "name": "loja-informatica-backend",
-  "version": "0.1.0",
+  "name": "loja-informatica",
+  "version": "1.0.0",
   "private": true,
-  "description": "Backend serverless + motor de automacao para loja de informatica (WhatsApp/SURI, PIX, cartao)",
-  "type": "module",
-  "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "dev": "tsx src/index.ts",
-    "check:env": "tsx scripts/check-env.ts",
-    "e2e": "tsx scripts/e2e-real.ts",
-    "prestart": "npm run build && npm run check:env",
-    "start": "node dist/index.js",
-    "docker:up": "docker compose up --build -d",
-    "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f app"
-  },
+  "description": "Monorepo da Loja de Informatica: apps/app (Next.js - Monte seu PC + Painel CRM), apps/agent (Evolution API WhatsApp) e packages/db (Prisma/PostgreSQL)",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "engines": {
     "node": ">=20"
   },
-  "dependencies": {
-    "ioredis": "^6.0.0",
-    "openai": "^4.71.0",
-    "zod": "^3.23.8"
+  "scripts": {
+    "build": "npm run generate -w @loja/db && npm run build -w @loja/catalog && npm run build -w @loja/db && npm run build -w @loja/agent",
+    "typecheck": "npm run typecheck -w @loja/catalog && npm run typecheck -w @loja/db && npm run typecheck -w @loja/agent && npm run typecheck -w @loja/app",
+    "test": "npm run test -w @loja/agent",
+    "dev:agent": "npm run dev -w @loja/agent",
+    "dev:app": "npm run dev -w @loja/app",
+    "db:generate": "npm run generate -w @loja/db",
+    "db:migrate": "npm run migrate -w @loja/db",
+    "db:deploy": "npm run deploy -w @loja/db",
+    "db:seed": "npm run seed -w @loja/db",
+    "check:env": "npm run check:env -w @loja/agent",
+    "docker:up": "docker compose up --build -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
   },
-  "devDependencies": {
-    "@types/node": "^22.9.0",
-    "tsx": "^4.19.2",
-    "typescript": "^5.6.3",
-    "vitest": "^2.1.5"
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "prisma@6.19.3": true,
+    "esbuild@0.28.2": true,
+    "esbuild@0.21.5": true,
+    "sharp@0.34.5": true
   }
 }
