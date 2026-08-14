@@ -108,6 +108,17 @@ export class EvolutionWebhookHandler {
         unreadDelta: 1,
       });
 
+      const quoteCode = findQuoteCode(parsed.text);
+      if (quoteCode) {
+        const flagged = await this.repository.markHighValueOpportunity(conversation.id, quoteCode);
+        if (flagged.flagged) {
+          this.logger(
+            `[${phone}] orcamento ${quoteCode} detectado na mensagem; ` +
+              `oportunidade de alto valor${flagged.linked ? ' (vinculado ao pedido)' : ' (sem vinculo)'}.`,
+          );
+        }
+      }
+
       if (conversation.humanMode) {
         this.logger(`[${phone}] atendimento assumido por humano; IA pausada.`);
         return { ok: true, handled: false, skipped: 'human_mode' };
@@ -155,6 +166,15 @@ export interface NormalizedMessage {
   caption?: string;
   mediaUrl?: string;
   mediaMimeType?: string;
+}
+
+const QUOTE_CODE_RE = /\bQ-[A-Z2-9]{6}\b/i;
+
+/** Detecta um codigo de orcamento do "Monte seu PC" (ex.: Q-AB2CDE) no texto. */
+export function findQuoteCode(text: string | undefined | null): string | null {
+  if (!text) return null;
+  const match = text.match(QUOTE_CODE_RE);
+  return match ? match[0].toUpperCase() : null;
 }
 
 export function normalizeMessage(message?: Record<string, unknown>): NormalizedMessage {

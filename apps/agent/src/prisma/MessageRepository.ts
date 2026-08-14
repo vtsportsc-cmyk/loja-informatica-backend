@@ -18,6 +18,8 @@ export interface ConversationRecord {
   assignedAgentId: string | null;
   unreadCount: number;
   lastMessageAt: string | null;
+  /** Orcamento/pedido vinculado (Monte seu PC), quando houver. */
+  quote?: QuoteSummary | null;
 }
 
 export interface MessageRecord {
@@ -56,6 +58,20 @@ export interface QuoteRecord {
   items: QuoteItemRecord[];
 }
 
+/** Resumo do orcamento exposto ao painel de CRM (modulo Pedidos). */
+export interface QuoteSummary {
+  code: string;
+  totalCents: number;
+  pixTotalCents: number;
+  installments: number;
+  monthlyValueCents: number;
+  parceledTotalCents: number;
+  blingOrderId: string | null;
+  blingNumber: string | null;
+  blingStatus: string | null;
+  items: QuoteItemRecord[];
+}
+
 export interface IMessageRepository {
   ensureConversation(whatsappId: string, name?: string | null): Promise<ConversationRecord>;
   getConversationById(id: string): Promise<ConversationRecord | null>;
@@ -69,6 +85,12 @@ export interface IMessageRepository {
   assume(conversationId: string, agentId: string): Promise<void>;
   release(conversationId: string): Promise<void>;
   setFunnelStatus(conversationId: string, status: string): Promise<ConversationRecord>;
+  findQuoteByCode(code: string): Promise<QuoteRecord | null>;
+  /** Marca a conversa como oportunidade de alto valor e vincula o orcamento. */
+  markHighValueOpportunity(
+    conversationId: string,
+    quoteCode: string,
+  ): Promise<{ flagged: boolean; linked: boolean }>;
   getQuoteForConversation(conversationId: string): Promise<QuoteRecord | null>;
   setQuoteBling(quoteId: string, blingOrderId: string, blingNumber: string): Promise<void>;
 }
@@ -97,26 +119,32 @@ export class PrismaMessageRepository implements IMessageRepository {
   async getConversationById(id: string): Promise<ConversationRecord | null> {
     const conv = await this.prisma.conversation.findUnique({
       where: { id },
-      include: { customer: true },
+      include: { customer: true, quote: { include: { items: true } } },
     });
-    return conv ? toConversationRecord(conv, conv.customer.name, conv.customer.whatsappId) : null;
+    return conv
+      ? toConversationRecord(conv, conv.customer.name, conv.customer.whatsappId, mapQuoteSummary(conv.quote))
+      : null;
   }
 
   async getConversationByWhatsapp(whatsappId: string): Promise<ConversationRecord | null> {
     const conv = await this.prisma.conversation.findFirst({
       where: { customer: { whatsappId: normalizePhone(whatsappId) } },
-      include: { customer: true },
+      include: { customer: true, quote: { include: { items: true } } },
     });
-    return conv ? toConversationRecord(conv, conv.customer.name, conv.customer.whatsappId) : null;
+    return conv
+      ? toConversationRecord(conv, conv.customer.name, conv.customer.whatsappId, mapQuoteSummary(conv.quote))
+      : null;
   }
 
   async listConversations(): Promise<ConversationRecord[]> {
     const convs = await this.prisma.conversation.findMany({
-      include: { customer: true },
+      include: { customer: true, quote: { include: { items: true } } },
       orderBy: { lastMessageAt: 'desc' },
       take: 200,
     });
-    return convs.map((c) => toConversationRecord(c, c.customer.name, c.customer.whatsappId));
+    return convs.map((c) =>
+      toConversationRecord(c, c.customer.name, c.customer.whatsappId, mapQuoteSummary(c.quote)),
+    );
   }
 
   async listMessages(conversationId: string): Promise<MessageRecord[]> {
@@ -208,9 +236,63 @@ export class PrismaMessageRepository implements IMessageRepository {
     const conv = await this.prisma.conversation.update({
       where: { id: conversationId },
       data: { funnelStatus: status as FunnelStatus },
+      include: { customer: true, quote: { include: { items: true } } },
+    });
+    return toConversationRecord(conv, conv.customer.name, conv.customer.whatsappId, mapQuoteSummary(conv.quote));
+  }
+
+  async findQuoteByCode(code: string): Promise<QuoteRecord | null> {
+    const quote = await this.prisma.quote.findUnique({
+      where: { code },
+      include: { customer: true, items: true },
+    });
+    if (!quote) return null;
+    return {
+      id: quote.id,
+      code: quote.code,
+      totalCents: quote.totalCents,
+      pixTotalCents: quote.pixTotalCents,
+      customer: { name: quote.customer.name, phone: quote.customer.whatsappId },
+      items: quote.items.map((item) => ({
+        sku: item.sku,
+        name: item.name,
+        unitPriceCents: item.unitPriceCents,
+        quantity: item.quantity,
+      })),
+    };
+  }
+
+  async markHighValueOpportunity(
+    conversationId: string,
+    quoteCode: string,
+  ): Promise<{ flagged: boolean; linked: boolean }> {
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
       include: { customer: true },
     });
-    return toConversationRecord(conv, conv.customer.name, conv.customer.whatsappId);
+    if (!conv) return { flagged: false, linked: false };
+
+    const quote = await this.prisma.quote.findUnique({ where: { code: quoteCode } });
+    let linked = false;
+    if (quote && quote.customerId === conv.customerId) {
+      try {
+        await this.prisma.quote.update({
+          where: { id: quote.id },
+          data: { conversationId },
+        });
+        linked = true;
+      } catch {
+        linked = false;
+      }
+    }
+
+    if (EARLY_FUNNEL_STATUSES.has(conv.funnelStatus)) {
+      await this.prisma.conversation.update({
+        where: { id: conversationId },
+        data: { funnelStatus: 'ALTA_VALOR', unreadCount: { increment: 1 } },
+      });
+    }
+    return { flagged: true, linked };
   }
 
   async getQuoteForConversation(conversationId: string): Promise<QuoteRecord | null> {
@@ -257,7 +339,10 @@ export class InMemoryMessageRepository implements IMessageRepository {
     direction: string;
     at: string;
   }> = [];
+  /** Orcamentos vinculados a uma conversa (chave = conversationId). */
   private quotes = new Map<string, QuoteRecord>();
+  /** Indice de orcamentos por codigo (inclusive os ainda nao vinculados). */
+  private quoteIndex = new Map<string, QuoteRecord>();
 
   async ensureConversation(whatsappId: string, name?: string | null): Promise<ConversationRecord> {
     const clean = normalizePhone(whatsappId);
@@ -360,6 +445,37 @@ export class InMemoryMessageRepository implements IMessageRepository {
     return conv;
   }
 
+  async findQuoteByCode(code: string): Promise<QuoteRecord | null> {
+    return this.quoteIndex.get(code) ?? null;
+  }
+
+  async markHighValueOpportunity(
+    conversationId: string,
+    quoteCode: string,
+  ): Promise<{ flagged: boolean; linked: boolean }> {
+    const conv = this.conversations.get(conversationId);
+    if (!conv) return { flagged: false, linked: false };
+
+    const quote = await this.findQuoteByCode(quoteCode);
+    let linked = false;
+    if (quote && this.quotes.get(conversationId)?.id !== quote.id) {
+      this.quotes.set(conversationId, quote);
+      linked = true;
+    }
+
+    if (EARLY_FUNNEL_STATUSES.has(conv.funnelStatus)) {
+      conv.funnelStatus = 'ALTA_VALOR';
+      conv.unreadCount += 1;
+    }
+    return { flagged: true, linked };
+  }
+
+  /** Apenas para testes/demos: registra um orcamento no repositorio em memoria. */
+  seedQuote(quote: QuoteRecord, conversationId?: string): void {
+    this.quoteIndex.set(quote.code, quote);
+    if (conversationId) this.quotes.set(conversationId, quote);
+  }
+
   async getQuoteForConversation(conversationId: string): Promise<QuoteRecord | null> {
     return this.quotes.get(conversationId) ?? null;
   }
@@ -385,9 +501,11 @@ function toConversationRecord(
     assignedAgentId: string | null;
     unreadCount: number;
     lastMessageAt: Date | null;
+    quote?: { id: string; items: { sku: string | null; name: string; unitPriceCents: number; quantity: number }[] } | null;
   },
   customerName: string | null,
   customerWhatsappId: string,
+  quoteSummary?: QuoteSummary | null,
 ): ConversationRecord {
   return {
     id: conv.id,
@@ -399,8 +517,48 @@ function toConversationRecord(
     assignedAgentId: conv.assignedAgentId,
     unreadCount: conv.unreadCount,
     lastMessageAt: conv.lastMessageAt ? conv.lastMessageAt.toISOString() : null,
+    quote: quoteSummary ?? null,
   };
 }
+
+function mapQuoteSummary(quote: {
+  code: string;
+  totalCents: number;
+  pixTotalCents: number;
+  installments: number;
+  installmentValueCents: number;
+  parceledTotalCents: number;
+  blingOrderId: string | null;
+  blingNumber: string | null;
+  blingStatus: string | null;
+  items: { sku: string | null; name: string; unitPriceCents: number; quantity: number }[];
+} | null): QuoteSummary | null {
+  if (!quote) return null;
+  return {
+    code: quote.code,
+    totalCents: quote.totalCents,
+    pixTotalCents: quote.pixTotalCents,
+    installments: quote.installments,
+    monthlyValueCents: quote.installmentValueCents,
+    parceledTotalCents: quote.parceledTotalCents,
+    blingOrderId: quote.blingOrderId,
+    blingNumber: quote.blingNumber,
+    blingStatus: quote.blingStatus,
+    items: quote.items.map((item) => ({
+      sku: item.sku,
+      name: item.name,
+      unitPriceCents: item.unitPriceCents,
+      quantity: item.quantity,
+    })),
+  };
+}
+
+/** Estados iniciais do funil que podem ser promovidos a ALTA_VALOR. */
+const EARLY_FUNNEL_STATUSES = new Set<string>([
+  'NOVO',
+  'MONTANDO_PC',
+  'EM_QUALIFICACAO',
+]);
 
 function normalizePhone(phone: string): string {
   return phone.replace(/@s\.whatsapp\.net$/i, '').replace(/[^\d]/g, '');

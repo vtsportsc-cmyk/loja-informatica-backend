@@ -1,21 +1,5 @@
-import { PrismaClient } from '@prisma/client';
-
-export { PrismaClient } from '@prisma/client';
-export * from '@prisma/client';
-
-const globalForPrisma = globalThis as unknown as { __lojaPrisma?: PrismaClient };
-
-export const prisma: PrismaClient =
-  globalForPrisma.__lojaPrisma ??
-  new PrismaClient({
-    log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
-  });
-
-if (process.env.NODE_ENV !== 'production') {
-  globalForPrisma.__lojaPrisma = prisma;
-}
-
-/** Status do funil de CRM, na mesma ordem do painel. */
+// Metadados do funil de CRM, client-safe (nao importa @loja/db, que instancia
+// o PrismaClient no modulo). Mantido em sintonia com packages/db/src/index.ts.
 export const FUNNEL_STATUSES = [
   'NOVO',
   'MONTANDO_PC',
@@ -33,7 +17,7 @@ export const FUNNEL_STATUS_LABELS: Record<FunnelStatus, string> = {
   NOVO: 'Novo',
   MONTANDO_PC: 'Montando PC',
   EM_QUALIFICACAO: 'Em Qualificação',
-  ALTA_VALOR: 'Oportunidade de Alto Valor',
+  ALTA_VALOR: 'Alto Valor',
   CARRINHO: 'Carrinho',
   PIX_GERADO: 'PIX Gerado',
   AGUARDANDO_NF: 'Aguardando NF',
@@ -50,7 +34,3 @@ export const FUNNEL_STATUS_COLORS: Record<FunnelStatus, string> = {
   AGUARDANDO_NF: 'bg-orange-500',
   CONCLUIDO: 'bg-emerald-500',
 };
-
-export function isFunnelStatus(value: string): value is FunnelStatus {
-  return (FUNNEL_STATUSES as readonly string[]).includes(value);
-}

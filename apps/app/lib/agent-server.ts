@@ -20,17 +20,27 @@ export async function agentFetch(
     'x-agent-key': apiKey,
     ...((init?.headers as Record<string, string>) ?? {}),
   };
-  const res = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    headers,
-    cache: 'no-store',
-  });
-  const text = await res.text();
-  let body: unknown = {};
   try {
-    body = text ? JSON.parse(text) : {};
-  } catch {
-    body = text;
+    const res = await fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers,
+      cache: 'no-store',
+    });
+    const text = await res.text();
+    let body: unknown = {};
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch {
+      body = text;
+    }
+    return { status: res.status, body };
+  } catch (err) {
+    return {
+      status: 503,
+      body: {
+        error: 'agente indisponivel',
+        detail: `falha ao conectar em ${baseUrl}: ${(err as Error).message}`,
+      },
+    };
   }
-  return { status: res.status, body };
 }

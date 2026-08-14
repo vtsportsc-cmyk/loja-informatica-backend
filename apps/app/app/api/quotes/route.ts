@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createQuote } from '@/lib/quotes-store';
 import type { QuoteItemJson } from '@/lib/quotes-store';
-import { formatBRL } from '@loja/catalog';
+import { formatBRL, PIX_DISCOUNT_PERCENT } from '@loja/catalog';
 
 const STORE_WHATSAPP_NUMBER = process.env.STORE_WHATSAPP_NUMBER ?? '5511999990000';
 
@@ -26,12 +26,19 @@ export async function POST(req: Request) {
   });
 
   const summaryText = items
-    .map((item) => `• ${item.quantity}x ${item.name} — ${formatBRL(item.unitPriceCents * item.quantity)}`)
+    .map((item) => {
+      const spec = item.specSummary ? ` (${item.specSummary})` : '';
+      return `• ${item.quantity}x ${item.name}${spec} — ${formatBRL(item.unitPriceCents * item.quantity)}`;
+    })
     .join('\n');
+  const clientLine = quote.customerName ? `\nCliente: ${quote.customerName}` : '';
   const message =
-    `Olá! Montei este PC na LojaTech e quero confirmar o orçamento.\n\n` +
-    `Código: ${quote.code}\n\n${summaryText}\n\n` +
-    `Total à vista (PIX): ${formatBRL(quote.pixTotalCents)}`;
+    `Olá! Montei este PC no Monte Seu PC e quero confirmar o orçamento.\n\n` +
+    `Código do orçamento: ${quote.code}${clientLine}\n\n${summaryText}\n\n` +
+    `Subtotal: ${formatBRL(quote.subtotalCents)}\n` +
+    `Desconto PIX (-${PIX_DISCOUNT_PERCENT}%): ${formatBRL(quote.discountCents)}\n` +
+    `Total à vista (PIX): ${formatBRL(quote.pixTotalCents)}\n` +
+    `ou ${quote.installments}x de ${formatBRL(quote.monthlyValueCents)} (total ${formatBRL(quote.parceledTotalCents)})`;
   const waLink = `https://wa.me/${STORE_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
 
   return NextResponse.json({ quote, waLink }, { status: 201 });

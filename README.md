@@ -10,8 +10,10 @@ Monorepo (npm workspaces) de uma loja de informática com:
 Fluxo de alto nível:
 
 ```
-Monte seu PC (apps/app) ── orçamento ──► WhatsApp da loja
+Monte seu PC (apps/app) ── orçamento (Q-XXXXXX) ──► wa.me do WhatsApp da loja
 Cliente conversa ──► Evolution API ──► POST /webhooks/whatsapp ──► MessageHandler (IA + FSM + RAG)
+                                          │ mensagem com código Q- → funil "Oportunidade de Alto Valor"
+                                          │   + vínculo do orçamento + aviso ao atendente (não-lido)
                                           │ cria cobrança PIX / cartão
 Pagamento ──► POST /webhooks/payment ──► PaymentWebhookProcessor (cria pedido "Aguardando NF")
 Painel CRM (apps/app) ──► /api/conversations | handoff | status ──► AGUARDANDO_NF ──► Bling (NF)
@@ -99,7 +101,7 @@ POST http://localhost:3000/webhooks/whatsapp   (evento: messages.upsert)
 ### Painel CRM
 
 ```
-GET  /api/conversations          lista de conversas do funil
+GET  /api/conversations          lista de conversas do funil (+ orçamento vinculado)
 GET  /api/conversations/:id      conversa + histórico
 POST /api/messages               vendedor envia mensagem { conversationId, agentId, text }
 POST /api/conversations/:id/handoff   { action: "assume"|"release", agentId }
@@ -107,6 +109,30 @@ POST /api/conversations/:id/status    { status }  (AGUARDANDO_NF dispara o Bling
 ```
 
 Todas exigem o header `x-agent-key`.
+
+#### Módulos do painel (`/crm`)
+
+- **Funil de Vendas** — Kanban por estágio (`NOVO`, `MONTANDO_PC`, `EM_QUALIFICACAO`,
+  `ALTA_VALOR`, `CARRINHO`, `PIX_GERADO`, `AGUARDANDO_NF`, `CONCLUIDO`), com valor do
+  orçamento, não-lidos e indicador IA/humano por card.
+- **Atendimento** — WhatsApp multi-atendente: lista de conversas, histórico, compositor e
+  toggle **IA/Humano** (assumir/liberar) + painel de contexto com o resumo do pedido.
+- **Pedidos** — tabela corporativa dos orçamentos vinculados (código, valores PIX/parcelado,
+  situação Bling) com ação **Emitir pedido** (move o funil para `AGUARDANDO_NF` e dispara a
+  emissão/expedição no Bling).
+
+#### Oportunidade de Alto Valor
+
+Quando o cliente envia pelo WhatsApp uma mensagem com um código de orçamento do
+"Monte seu PC" (`Q-XXXXXX`), o agente automaticamente:
+
+1. vincula o orçamento à conversa (`Quote.conversationId`);
+2. promove o funil para **`ALTA_VALOR`** (se ainda em `NOVO`/`MONTANDO_PC`/`EM_QUALIFICACAO`);
+3. incrementa o contador de não-lidos para chamar a atenção do atendente.
+
+A IA segue respondendo normalmente (triagem/dúvidas); o lead fica sinalizado no painel
+para atendimento manual. A rota `/builder` é 100% do cliente — sem elementos de CRM/chat —
+e direciona a finalização para o WhatsApp da loja (`wa.me`).
 
 ## 5. Docker / produção
 
@@ -122,6 +148,6 @@ Fluxo do vendedor (funil `AGUARDANDO_NF`): separar estoque físico → emitir NF
 
 ```bash
 npm run typecheck   # todos os workspaces
-npm test            # vitest (apps/agent) — 81 testes
+npm test            # vitest (apps/agent) — 88 testes
 npm run db:seed     # semente de agentes e conversa demo
 ```
