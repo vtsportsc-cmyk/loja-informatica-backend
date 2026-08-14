@@ -38,7 +38,7 @@ model Agent {
   id            String         @id @default(cuid())
   name          String
   role          String?
-  email         String?
+  email         String?    @unique
   avatarColor   String?
   active        Boolean        @default(true)
   createdAt     DateTime       @default(now())

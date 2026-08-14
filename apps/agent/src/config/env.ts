@@ -3,17 +3,29 @@ import { resolve } from 'node:path';
 import { envSchema } from './env.schema.js';
 
 // Carrega o arquivo .env (quando existir) para process.env SEM sobrescrever
-// variaveis ja definidas pelo ambiente/CI. Usado no boot e no check:env.
-export function loadDotEnvFile(path = resolve(process.cwd(), '.env')): void {
-  if (!existsSync(path)) return;
-  const lines = readFileSync(path, 'utf8').split(/\r?\n/);
-  for (const line of lines) {
-    const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-    const key = m?.[1];
-    const value = m?.[2];
-    if (key && value !== undefined && process.env[key] === undefined) {
-      process.env[key] = value.replace(/^"|"$/g, '');
+// variaveis ja definidas pelo ambiente/CI. Procura no diretorio atual e sobe
+// a arvore de pastas ate a raiz, cobrindo o monorepo (workspace vs raiz).
+export function loadDotEnvFile(startDir = process.cwd()): void {
+  let dir = resolve(startDir);
+  const visited = new Set<string>();
+  while (!visited.has(dir)) {
+    visited.add(dir);
+    const candidate = resolve(dir, '.env');
+    if (existsSync(candidate)) {
+      const lines = readFileSync(candidate, 'utf8').split(/\r?\n/);
+      for (const line of lines) {
+        const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+        const key = m?.[1];
+        const value = m?.[2];
+        if (key && value !== undefined && process.env[key] === undefined) {
+          process.env[key] = value.replace(/^"|"$/g, '');
+        }
+      }
+      return;
     }
+    const parent = resolve(dir, '..');
+    if (parent === dir) return;
+    dir = parent;
   }
 }
 
