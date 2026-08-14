@@ -17,6 +17,7 @@
     "dev:agent": "npm run dev -w @loja/agent",
     "dev:app": "npm run dev -w @loja/app",
     "db:generate": "npm run generate -w @loja/db",
+    "db:push": "prisma db push --schema packages/db/prisma/schema.prisma",
     "db:migrate": "npm run migrate -w @loja/db",
     "db:deploy": "npm run deploy -w @loja/db",
     "db:seed": "npm run seed -w @loja/db",
