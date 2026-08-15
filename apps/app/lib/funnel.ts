@@ -9,6 +9,7 @@ export const FUNNEL_STATUSES = [
   'PIX_GERADO',
   'AGUARDANDO_NF',
   'CONCLUIDO',
+  'CANCELADO',
 ] as const;
 
 export type FunnelStatus = (typeof FUNNEL_STATUSES)[number];
@@ -22,6 +23,7 @@ export const FUNNEL_STATUS_LABELS: Record<FunnelStatus, string> = {
   PIX_GERADO: 'PIX Gerado',
   AGUARDANDO_NF: 'Aguardando NF',
   CONCLUIDO: 'Concluído',
+  CANCELADO: 'Cancelado / Perdido',
 };
 
 export const FUNNEL_STATUS_COLORS: Record<FunnelStatus, string> = {
@@ -33,4 +35,5 @@ export const FUNNEL_STATUS_COLORS: Record<FunnelStatus, string> = {
   PIX_GERADO: 'bg-cyan-500',
   AGUARDANDO_NF: 'bg-orange-500',
   CONCLUIDO: 'bg-emerald-500',
+  CANCELADO: 'bg-red-600',
 };

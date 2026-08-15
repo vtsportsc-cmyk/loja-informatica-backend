@@ -1,5 +1,14 @@
-import { Department, FunnelStatus } from '@loja/db';
-import type { PrismaClient } from '@loja/db';
+import {
+  Department,
+  FunnelStatus,
+  LeadSource,
+  LostReason,
+  isLeadSource,
+  isLostReason,
+  FUNNEL_STATUS_LABELS,
+  LOST_REASON_LABELS,
+} from '@loja/db';
+import type { PrismaClient, ConversationEventType } from '@loja/db';
 
 // ============================================================================
 // Camada de persistencia de conversas/mensagens no PostgreSQL (via Prisma).
@@ -15,12 +24,24 @@ export interface ConversationRecord {
   customerName: string | null;
   funnelStatus: string;
   department: string | null;
+  leadSource: string | null;
+  lostReason: string | null;
+  lostAt: string | null;
+  lastFollowUpAt: string | null;
   humanMode: boolean;
   assignedAgentId: string | null;
   unreadCount: number;
   lastMessageAt: string | null;
   /** Orcamento/pedido vinculado (Monte seu PC), quando houver. */
   quote?: QuoteSummary | null;
+}
+
+export interface TimelineEventRecord {
+  id: string;
+  type: string;
+  title: string;
+  detail: string | null;
+  createdAt: string;
 }
 
 export interface AgentRecord {
@@ -108,6 +129,16 @@ export interface IMessageRepository {
   ): Promise<{ flagged: boolean; linked: boolean }>;
   getQuoteForConversation(conversationId: string): Promise<QuoteRecord | null>;
   setQuoteBling(quoteId: string, blingOrderId: string, blingNumber: string): Promise<void>;
+  /** Define a origem do lead (BUILDER/WHATSAPP_DIRECT/INDICACAO/BALCAO). */
+  setLeadSource(conversationId: string, source: string | null): Promise<ConversationRecord>;
+  /** Marca a conversa como perdida (CANCELADO) com o motivo informado. */
+  markLost(conversationId: string, lostReason: string): Promise<ConversationRecord>;
+  /** Historico cronologico de atividades da conversa (timeline unificado). */
+  listTimeline(conversationId: string): Promise<TimelineEventRecord[]>;
+  /** Conversas ALTA_VALOR com orcamento e sem interacao desde `since` (e sem follow-up recente). */
+  listPendingFollowUp(since: Date): Promise<ConversationRecord[]>;
+  /** Registra o follow-up de reengajamento e evita novo envio imediato. */
+  markFollowedUp(conversationId: string): Promise<void>;
 }
 
 // ----------------------------------------------------------------------------
@@ -123,12 +154,23 @@ export class PrismaMessageRepository implements IMessageRepository {
       update: name ? { name } : {},
       create: { whatsappId: clean, name: name ?? null },
     });
-    const conversation = await this.prisma.conversation.upsert({
+    let conversation = await this.prisma.conversation.findUnique({
       where: { customerId: customer.id },
-      update: {},
-      create: { customerId: customer.id },
+      include: { customer: true, quote: { include: { items: true } } },
     });
-    return toConversationRecord(conversation, customer.name, customer.whatsappId);
+    if (!conversation) {
+      conversation = await this.prisma.conversation.create({
+        data: { customerId: customer.id, leadSource: 'WHATSAPP_DIRECT' },
+        include: { customer: true, quote: { include: { items: true } } },
+      });
+      await this.addEvent(
+        conversation.id,
+        'CONVERSATION_CREATED',
+        'Conversa iniciada',
+        'Cliente entrou em contato pelo WhatsApp',
+      );
+    }
+    return toConversationRecord(conversation, customer.name, customer.whatsappId, mapQuoteSummary(conversation.quote));
   }
 
   async getConversationById(id: string): Promise<ConversationRecord | null> {
@@ -248,10 +290,18 @@ export class PrismaMessageRepository implements IMessageRepository {
   }
 
   async assume(conversationId: string, agentId: string): Promise<void> {
+    const prev = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
     await this.prisma.conversation.update({
       where: { id: conversationId },
       data: { humanMode: true, assignedAgentId: agentId, unreadCount: 0 },
     });
+    await this.addEvent(
+      conversationId,
+      'HANDOFF',
+      'Atendimento humano iniciado',
+      `Atendente ${agentId} assumiu a conversa`,
+    );
+    void prev;
   }
 
   async release(conversationId: string): Promise<void> {
@@ -259,15 +309,141 @@ export class PrismaMessageRepository implements IMessageRepository {
       where: { id: conversationId },
       data: { humanMode: false, assignedAgentId: null },
     });
+    await this.addEvent(
+      conversationId,
+      'HANDOFF',
+      'Atendimento liberado para a IA',
+      'O assistente virtual voltou a responder',
+    );
   }
 
   async setFunnelStatus(conversationId: string, status: string): Promise<ConversationRecord> {
+    const prev = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      include: { customer: true, quote: { include: { items: true } } },
+    });
+    if (!prev) throw new Error(`Conversa nao encontrada: ${conversationId}`);
+
+    const wasLost = prev.funnelStatus === 'CANCELADO';
     const conv = await this.prisma.conversation.update({
       where: { id: conversationId },
-      data: { funnelStatus: status as FunnelStatus },
+      data: {
+        funnelStatus: status as FunnelStatus,
+        ...(wasLost && status !== 'CANCELADO'
+          ? { lostReason: null, lostAt: null }
+          : {}),
+      },
+      include: { customer: true, quote: { include: { items: true } } },
+    });
+
+    if (prev.funnelStatus !== (status as FunnelStatus)) {
+      await this.addEvent(
+        conversationId,
+        'FUNNEL_STATUS_CHANGED',
+        `Funil: ${FUNNEL_STATUS_LABELS[prev.funnelStatus]} → ${FUNNEL_STATUS_LABELS[status as FunnelStatus]}`,
+        `Status atualizado para ${FUNNEL_STATUS_LABELS[status as FunnelStatus]}`,
+      );
+    }
+
+    return toConversationRecord(conv, conv.customer.name, conv.customer.whatsappId, mapQuoteSummary(conv.quote));
+  }
+
+  async setLeadSource(
+    conversationId: string,
+    source: string | null,
+  ): Promise<ConversationRecord> {
+    if (source !== null && !isLeadSource(source)) {
+      throw new Error(`origem do lead invalida: ${source}`);
+    }
+    const conv = await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        leadSource: source === null ? null : (source as LeadSource),
+      },
       include: { customer: true, quote: { include: { items: true } } },
     });
     return toConversationRecord(conv, conv.customer.name, conv.customer.whatsappId, mapQuoteSummary(conv.quote));
+  }
+
+  async markLost(conversationId: string, lostReason: string): Promise<ConversationRecord> {
+    if (!isLostReason(lostReason)) {
+      throw new Error(`motivo de perda invalido: ${lostReason}`);
+    }
+    const conv = await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        funnelStatus: 'CANCELADO',
+        lostReason: lostReason as LostReason,
+        lostAt: new Date(),
+      },
+      include: { customer: true, quote: { include: { items: true } } },
+    });
+    await this.addEvent(
+      conversationId,
+      'LEAD_LOST',
+      'Pedido perdido',
+      `Motivo: ${LOST_REASON_LABELS[lostReason as LostReason]}`,
+    );
+    return toConversationRecord(conv, conv.customer.name, conv.customer.whatsappId, mapQuoteSummary(conv.quote));
+  }
+
+  async listTimeline(conversationId: string): Promise<TimelineEventRecord[]> {
+    const events = await this.prisma.conversationEvent.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    return events.map((e) => ({
+      id: e.id,
+      type: e.type,
+      title: e.title,
+      detail: e.detail,
+      createdAt: e.createdAt.toISOString(),
+    }));
+  }
+
+  async listPendingFollowUp(since: Date): Promise<ConversationRecord[]> {
+    const convs = await this.prisma.conversation.findMany({
+      where: {
+        funnelStatus: 'ALTA_VALOR',
+        quote: { isNot: null },
+        lastMessageAt: { lt: since },
+        OR: [{ lastFollowUpAt: null }, { lastFollowUpAt: { lt: since } }],
+      },
+      include: { customer: true, quote: { include: { items: true } } },
+      take: 50,
+    });
+    return convs.map((c) =>
+      toConversationRecord(c, c.customer.name, c.customer.whatsappId, mapQuoteSummary(c.quote)),
+    );
+  }
+
+  async markFollowedUp(conversationId: string): Promise<void> {
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { lastFollowUpAt: new Date() },
+    });
+    await this.addEvent(
+      conversationId,
+      'FOLLOW_UP_SENT',
+      'Follow-up enviado',
+      'Lembrete de orçamento enviado pelo WhatsApp',
+    );
+  }
+
+  private async addEvent(
+    conversationId: string,
+    type: string,
+    title: string,
+    detail?: string,
+  ): Promise<void> {
+    try {
+      await this.prisma.conversationEvent.create({
+        data: { conversationId, type: type as ConversationEventType, title, detail },
+      });
+    } catch {
+      // evento e auxiliar; nunca bloqueia o fluxo principal
+    }
   }
 
   async setDepartment(
@@ -334,11 +510,26 @@ export class PrismaMessageRepository implements IMessageRepository {
       }
     }
 
+    if (linked) {
+      await this.addEvent(
+        conversationId,
+        'QUOTE_CREATED',
+        `Orçamento ${quoteCode} vinculado`,
+        'Orçamento do Monte seu PC vinculado à conversa',
+      );
+    }
+
     if (EARLY_FUNNEL_STATUSES.has(conv.funnelStatus)) {
       await this.prisma.conversation.update({
         where: { id: conversationId },
         data: { funnelStatus: 'ALTA_VALOR', unreadCount: { increment: 1 } },
       });
+      await this.addEvent(
+        conversationId,
+        'FUNNEL_STATUS_CHANGED',
+        `Funil: ${FUNNEL_STATUS_LABELS[conv.funnelStatus]} → Oportunidade de Alto Valor`,
+        'Orçamento de alto valor detectado no WhatsApp',
+      );
     }
     return { flagged: true, linked };
   }
@@ -368,10 +559,19 @@ export class PrismaMessageRepository implements IMessageRepository {
   }
 
   async setQuoteBling(quoteId: string, blingOrderId: string, blingNumber: string): Promise<void> {
-    await this.prisma.quote.update({
+    const quote = await this.prisma.quote.update({
       where: { id: quoteId },
       data: { blingOrderId, blingNumber, blingStatus: 'created' },
+      include: { conversation: true },
     });
+    if (quote.conversationId) {
+      await this.addEvent(
+        quote.conversationId,
+        'ORDER_EMITTED',
+        `Pedido ${quote.code} emitido`,
+        `Pedido enviado ao Bling (#${blingNumber}) para emissão de NF/expedição`,
+      );
+    }
   }
 }
 
@@ -393,6 +593,33 @@ export class InMemoryMessageRepository implements IMessageRepository {
   private quoteIndex = new Map<string, QuoteRecord>();
   /** Resumo do orcamento exposto ao painel/automacao (chave = conversationId). */
   private quoteSummaries = new Map<string, QuoteSummary>();
+  /** Timeline unificado de atividades da conversa. */
+  private timeline: Array<{
+    conversationId: string;
+    id: string;
+    type: string;
+    title: string;
+    detail: string | null;
+    at: string;
+  }> = [];
+  private timelineCounter = 0;
+
+  private addEvent(
+    conversationId: string,
+    type: string,
+    title: string,
+    detail?: string,
+  ): void {
+    this.timelineCounter += 1;
+    this.timeline.push({
+      conversationId,
+      id: `evt-${this.timelineCounter}`,
+      type,
+      title,
+      detail: detail ?? null,
+      at: new Date().toISOString(),
+    });
+  }
 
   async ensureConversation(whatsappId: string, name?: string | null): Promise<ConversationRecord> {
     const clean = normalizePhone(whatsappId);
@@ -411,6 +638,10 @@ export class InMemoryMessageRepository implements IMessageRepository {
       customerName: name ?? null,
       funnelStatus: 'NOVO',
       department: null,
+      leadSource: 'WHATSAPP_DIRECT',
+      lostReason: null,
+      lostAt: null,
+      lastFollowUpAt: null,
       humanMode: false,
       assignedAgentId: null,
       unreadCount: 0,
@@ -418,6 +649,12 @@ export class InMemoryMessageRepository implements IMessageRepository {
     };
     this.conversations.set(conv.id, conv);
     this.whatsappIndex.set(clean, conv.id);
+    this.addEvent(
+      conv.id,
+      'CONVERSATION_CREATED',
+      'Conversa iniciada',
+      'Cliente entrou em contato pelo WhatsApp',
+    );
     return conv;
   }
 
@@ -487,6 +724,12 @@ export class InMemoryMessageRepository implements IMessageRepository {
       conv.humanMode = true;
       conv.assignedAgentId = agentId;
       conv.unreadCount = 0;
+      this.addEvent(
+        conversationId,
+        'HANDOFF',
+        'Atendimento humano iniciado',
+        `Atendente ${agentId} assumiu a conversa`,
+      );
     }
   }
 
@@ -495,14 +738,98 @@ export class InMemoryMessageRepository implements IMessageRepository {
     if (conv) {
       conv.humanMode = false;
       conv.assignedAgentId = null;
+      this.addEvent(
+        conversationId,
+        'HANDOFF',
+        'Atendimento liberado para a IA',
+        'O assistente virtual voltou a responder',
+      );
     }
   }
 
   async setFunnelStatus(conversationId: string, status: string): Promise<ConversationRecord> {
     const conv = this.conversations.get(conversationId);
     if (!conv) throw new Error(`Conversa nao encontrada: ${conversationId}`);
+    const previous = conv.funnelStatus;
     conv.funnelStatus = status;
+    if (previous === 'CANCELADO' && status !== 'CANCELADO') {
+      conv.lostReason = null;
+      conv.lostAt = null;
+    }
+    if (previous !== status) {
+      this.addEvent(
+        conversationId,
+        'FUNNEL_STATUS_CHANGED',
+        `Funil: ${FUNNEL_STATUS_LABELS[previous as FunnelStatus] ?? previous} → ${FUNNEL_STATUS_LABELS[status as FunnelStatus] ?? status}`,
+        `Status atualizado para ${FUNNEL_STATUS_LABELS[status as FunnelStatus] ?? status}`,
+      );
+    }
     return conv;
+  }
+
+  async setLeadSource(
+    conversationId: string,
+    source: string | null,
+  ): Promise<ConversationRecord> {
+    const conv = this.conversations.get(conversationId);
+    if (!conv) throw new Error(`Conversa nao encontrada: ${conversationId}`);
+    if (source !== null && !isLeadSource(source)) {
+      throw new Error(`origem do lead invalida: ${source}`);
+    }
+    conv.leadSource = source;
+    return conv;
+  }
+
+  async markLost(conversationId: string, lostReason: string): Promise<ConversationRecord> {
+    const conv = this.conversations.get(conversationId);
+    if (!conv) throw new Error(`Conversa nao encontrada: ${conversationId}`);
+    if (!isLostReason(lostReason)) {
+      throw new Error(`motivo de perda invalido: ${lostReason}`);
+    }
+    conv.funnelStatus = 'CANCELADO';
+    conv.lostReason = lostReason;
+    conv.lostAt = new Date().toISOString();
+    this.addEvent(
+      conversationId,
+      'LEAD_LOST',
+      'Pedido perdido',
+      `Motivo: ${LOST_REASON_LABELS[lostReason as LostReason]}`,
+    );
+    return conv;
+  }
+
+  async listTimeline(conversationId: string): Promise<TimelineEventRecord[]> {
+    return this.timeline
+      .filter((e) => e.conversationId === conversationId)
+      .sort((a, b) => (a.at < b.at ? 1 : -1))
+      .map((e) => ({ id: e.id, type: e.type, title: e.title, detail: e.detail, createdAt: e.at }));
+  }
+
+  async listPendingFollowUp(since: Date): Promise<ConversationRecord[]> {
+    const sinceMs = since.getTime();
+    const results: ConversationRecord[] = [];
+    for (const conv of this.conversations.values()) {
+      if (conv.funnelStatus !== 'ALTA_VALOR') continue;
+      if (!this.quoteSummaries.has(conv.id)) continue;
+      const lastAt = conv.lastMessageAt ? new Date(conv.lastMessageAt).getTime() : 0;
+      if (lastAt >= sinceMs) continue;
+      const followUpAt = conv.lastFollowUpAt ? new Date(conv.lastFollowUpAt).getTime() : 0;
+      if (followUpAt >= sinceMs) continue;
+      results.push({ ...conv, quote: this.quoteSummaries.get(conv.id) ?? null });
+    }
+    return results;
+  }
+
+  async markFollowedUp(conversationId: string): Promise<void> {
+    const conv = this.conversations.get(conversationId);
+    if (!conv) return;
+    conv.lastFollowUpAt = new Date().toISOString();
+    this.addEvent(
+      conversationId,
+      'FOLLOW_UP_SENT',
+      'Follow-up enviado',
+      'Lembrete de orçamento enviado pelo WhatsApp',
+    );
   }
 
   async setDepartment(
@@ -532,11 +859,24 @@ export class InMemoryMessageRepository implements IMessageRepository {
     if (quote && this.quotes.get(conversationId)?.id !== quote.id) {
       this.quotes.set(conversationId, quote);
       linked = true;
+      this.addEvent(
+        conversationId,
+        'QUOTE_CREATED',
+        `Orçamento ${quoteCode} vinculado`,
+        'Orçamento do Monte seu PC vinculado à conversa',
+      );
     }
 
     if (EARLY_FUNNEL_STATUSES.has(conv.funnelStatus)) {
+      const previous = conv.funnelStatus;
       conv.funnelStatus = 'ALTA_VALOR';
       conv.unreadCount += 1;
+      this.addEvent(
+        conversationId,
+        'FUNNEL_STATUS_CHANGED',
+        `Funil: ${FUNNEL_STATUS_LABELS[previous as FunnelStatus] ?? previous} → Oportunidade de Alto Valor`,
+        'Orçamento de alto valor detectado no WhatsApp',
+      );
     }
     return { flagged: true, linked };
   }
@@ -577,14 +917,17 @@ export class InMemoryMessageRepository implements IMessageRepository {
   }
 
   async setQuoteBling(quoteId: string, blingOrderId: string, blingNumber: string): Promise<void> {
-    for (const quote of this.quotes.values()) {
+    for (const [conversationId, quote] of this.quotes.entries()) {
       if (quote.id === quoteId) {
-        // sem persistencia extra em memoria
-        void quote;
+        this.addEvent(
+          conversationId,
+          'ORDER_EMITTED',
+          `Pedido ${quote.code} emitido`,
+          `Pedido enviado ao Bling (#${blingNumber}) para emissão de NF/expedição`,
+        );
       }
     }
     void blingOrderId;
-    void blingNumber;
   }
 }
 
@@ -594,6 +937,10 @@ function toConversationRecord(
     customerId: string;
     funnelStatus: FunnelStatus;
     department: Department | null;
+    leadSource: LeadSource | null;
+    lostReason: LostReason | null;
+    lostAt: Date | null;
+    lastFollowUpAt: Date | null;
     humanMode: boolean;
     assignedAgentId: string | null;
     unreadCount: number;
@@ -611,6 +958,10 @@ function toConversationRecord(
     customerName,
     funnelStatus: conv.funnelStatus,
     department: conv.department,
+    leadSource: conv.leadSource,
+    lostReason: conv.lostReason,
+    lostAt: conv.lostAt ? conv.lostAt.toISOString() : null,
+    lastFollowUpAt: conv.lastFollowUpAt ? conv.lastFollowUpAt.toISOString() : null,
     humanMode: conv.humanMode,
     assignedAgentId: conv.assignedAgentId,
     unreadCount: conv.unreadCount,

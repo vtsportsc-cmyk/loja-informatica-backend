@@ -25,6 +25,7 @@ export const FUNNEL_STATUSES = [
   'PIX_GERADO',
   'AGUARDANDO_NF',
   'CONCLUIDO',
+  'CANCELADO',
 ] as const;
 
 export type FunnelStatus = (typeof FUNNEL_STATUSES)[number];
@@ -38,6 +39,7 @@ export const FUNNEL_STATUS_LABELS: Record<FunnelStatus, string> = {
   PIX_GERADO: 'PIX Gerado',
   AGUARDANDO_NF: 'Aguardando NF',
   CONCLUIDO: 'Concluído',
+  CANCELADO: 'Cancelado / Perdido',
 };
 
 export const FUNNEL_STATUS_COLORS: Record<FunnelStatus, string> = {
@@ -49,10 +51,50 @@ export const FUNNEL_STATUS_COLORS: Record<FunnelStatus, string> = {
   PIX_GERADO: 'bg-cyan-500',
   AGUARDANDO_NF: 'bg-orange-500',
   CONCLUIDO: 'bg-emerald-500',
+  CANCELADO: 'bg-red-600',
 };
 
 export function isFunnelStatus(value: string): value is FunnelStatus {
   return (FUNNEL_STATUSES as readonly string[]).includes(value);
+}
+
+/** Origens do lead do CRM (Monte seu PC / WhatsApp / indicação / balcão). */
+export const LEAD_SOURCES = ['BUILDER', 'WHATSAPP_DIRECT', 'INDICACAO', 'BALCAO'] as const;
+
+export type LeadSource = (typeof LEAD_SOURCES)[number];
+
+export const LEAD_SOURCE_LABELS: Record<LeadSource, string> = {
+  BUILDER: 'Monte seu PC',
+  WHATSAPP_DIRECT: 'WhatsApp direto',
+  INDICACAO: 'Indicação',
+  BALCAO: 'Balcão',
+};
+
+export function isLeadSource(value: string): value is LeadSource {
+  return (LEAD_SOURCES as readonly string[]).includes(value);
+}
+
+/** Motivos de perda do lead (status CANCELADO / PERDIDO). */
+export const LOST_REASONS = [
+  'PRECO_ALTO',
+  'CONCORRENTE',
+  'FORA_DE_ESTOQUE',
+  'SEM_RESPOSTA',
+  'OUTRO',
+] as const;
+
+export type LostReason = (typeof LOST_REASONS)[number];
+
+export const LOST_REASON_LABELS: Record<LostReason, string> = {
+  PRECO_ALTO: 'Preço alto',
+  CONCORRENTE: 'Escolheu concorrente',
+  FORA_DE_ESTOQUE: 'Fora de estoque',
+  SEM_RESPOSTA: 'Sem resposta',
+  OUTRO: 'Outro',
+};
+
+export function isLostReason(value: string): value is LostReason {
+  return (LOST_REASONS as readonly string[]).includes(value);
 }
 
 /** Departamentos de atendimento do CRM (filas), na mesma ordem do painel. */

@@ -50,6 +50,7 @@ export interface EnvConfig {
   session: { store: 'memory' | 'redis'; ttlSeconds: number; redisUrl: string };
   crm: { baseURL: string; apiToken: string; enabled: boolean };
   ragIndexPath: string;
+  followUp: { inactivityHours: number; intervalMs: number };
 }
 
 export function loadEnv(env: NodeJS.ProcessEnv = process.env): EnvConfig {
@@ -126,5 +127,9 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): EnvConfig {
       enabled: v.CRM_ENABLED,
     },
     ragIndexPath: v.RAG_INDEX_PATH,
+    followUp: {
+      inactivityHours: v.FOLLOWUP_INACTIVITY_HOURS,
+      intervalMs: v.FOLLOWUP_INTERVAL_MINUTES * 60_000,
+    },
   };
 }

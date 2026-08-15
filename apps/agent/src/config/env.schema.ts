@@ -94,6 +94,12 @@ export const envSchema = z.object({
 
   // --- RAG ---
   RAG_INDEX_PATH: z.string().default('./data/knowledge-index.json'),
+
+  // --- Follow-up de orcamentos inativos (quoteFollowUpJob) ---
+  // Horas sem contato para o orcamento ALTA_VALOR ser considerado inativo.
+  FOLLOWUP_INACTIVITY_HOURS: z.coerce.number().int().positive().default(24),
+  // Intervalo entre varreduras do job (em minutos).
+  FOLLOWUP_INTERVAL_MINUTES: z.coerce.number().int().positive().default(60),
 });
 
 export type ValidEnv = z.infer<typeof envSchema>;

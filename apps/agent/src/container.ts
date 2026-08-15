@@ -43,6 +43,7 @@ import type { ICrmClient } from './integrations/crm/CrmClient.js';
 import { CrmFollowUpHandler } from './webhooks/crm.js';
 import { createChargeOnTransition } from './agent/chargeOnTransition.js';
 import { createFunnelAutomation } from './agent/funnelAutomation.js';
+import { createQuoteFollowUpJob, type QuoteFollowUpJob } from './agent/quoteFollowUpJob.js';
 import { Metrics } from './observability/metrics.js';
 import type { StockItem } from './types/index.js';
 
@@ -59,6 +60,7 @@ export interface AppContainer {
   knowledgeBase: KnowledgeBase;
   metrics: Metrics;
   paymentExpiryJob: PaymentExpiryJob;
+  quoteFollowUpJob?: QuoteFollowUpJob;
   repository: IMessageRepository;
   transcription: TranscriptionClient;
   evolutionWebhook?: EvolutionWebhookHandler;
@@ -193,6 +195,13 @@ export function buildContainer(options: BuildContainerOptions = {}): AppContaine
     expire: (ticketId) => paymentWebhook.expire(ticketId),
   });
 
+  const quoteFollowUpJob = createQuoteFollowUpJob({
+    repository,
+    evolution,
+    inactivityHours: env.followUp.inactivityHours,
+    intervalMs: env.followUp.intervalMs,
+  });
+
   const crmFollowUp = new CrmFollowUpHandler({ sessionStore, evolution });
 
   const funnelAutomation = createFunnelAutomation({
@@ -240,6 +249,7 @@ export function buildContainer(options: BuildContainerOptions = {}): AppContaine
     knowledgeBase,
     metrics,
     paymentExpiryJob,
+    quoteFollowUpJob,
     repository,
     transcription,
     evolutionWebhook,

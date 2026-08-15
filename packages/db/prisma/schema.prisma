@@ -20,12 +20,38 @@ enum FunnelStatus {
   PIX_GERADO
   AGUARDANDO_NF
   CONCLUIDO
+  CANCELADO
 }
 
 enum Department {
   VENDAS
   SUPORTE
   MONTAGEM
+}
+
+enum LeadSource {
+  BUILDER
+  WHATSAPP_DIRECT
+  INDICACAO
+  BALCAO
+}
+
+enum LostReason {
+  PRECO_ALTO
+  CONCORRENTE
+  FORA_DE_ESTOQUE
+  SEM_RESPOSTA
+  OUTRO
+}
+
+enum ConversationEventType {
+  CONVERSATION_CREATED
+  QUOTE_CREATED
+  FUNNEL_STATUS_CHANGED
+  HANDOFF
+  ORDER_EMITTED
+  LEAD_LOST
+  FOLLOW_UP_SENT
 }
 
 model Customer {
@@ -60,6 +86,10 @@ model Conversation {
   customer        Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
   funnelStatus    FunnelStatus @default(NOVO)
   department      Department?
+  leadSource      LeadSource?
+  lostReason      LostReason?
+  lostAt          DateTime?
+  lastFollowUpAt  DateTime?
   humanMode       Boolean      @default(false)
   assignedAgentId String?
   assignedAgent   Agent?       @relation(fields: [assignedAgentId], references: [id])
@@ -69,12 +99,26 @@ model Conversation {
   updatedAt       DateTime     @updatedAt
 
   messages Message[]
+  events   ConversationEvent[]
   lead     Lead?
   quote    Quote?
 
   @@index([funnelStatus])
   @@index([department])
   @@index([lastMessageAt])
+}
+
+model ConversationEvent {
+  id             String                @id @default(cuid())
+  conversationId String
+  conversation   Conversation          @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  type           ConversationEventType
+  title          String
+  detail         String?
+  metadata       Json?
+  createdAt      DateTime              @default(now())
+
+  @@index([conversationId, createdAt])
 }
 
 model Message {

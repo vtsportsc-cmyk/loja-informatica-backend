@@ -1,4 +1,13 @@
-import { DEPARTMENTS, FUNNEL_STATUSES, isDepartment, isFunnelStatus } from '@loja/db';
+import {
+  DEPARTMENTS,
+  FUNNEL_STATUSES,
+  LEAD_SOURCES,
+  LOST_REASONS,
+  isDepartment,
+  isFunnelStatus,
+  isLeadSource,
+  isLostReason,
+} from '@loja/db';
 import type { EvolutionApi } from '../integration/evolution/EvolutionApi.js';
 import type { BlingOrderService } from '../integration/bling/BlingOrderService.js';
 import type { IMessageRepository } from '../prisma/MessageRepository.js';
@@ -11,6 +20,8 @@ import type { FunnelStatusChangeHook } from '../agent/funnelAutomation.js';
 //   POST /api/conversations/:id/handoff     -> assumir / liberar atendimento
 //   POST /api/conversations/:id/status      -> mover status do funil (e Bling)
 //   POST /api/conversations/:id/department  -> atribuir departamento/atendente
+//   POST /api/conversations/:id/source      -> definir origem do lead
+//   POST /api/conversations/:id/lost        -> marcar como perdido (CANCELADO)
 //   GET  /api/agents                        -> lista de atendentes ativos
 // Todas exigem o header `x-agent-key` (AGENT_API_KEY).
 // ============================================================================
@@ -64,7 +75,8 @@ export class PanelApi {
       return { ok: false, status: 404, error: 'conversa nao encontrada' };
     }
     const messages = await this.repository.listMessages(conversationId);
-    return { ok: true, status: 200, data: { conversation, messages } };
+    const timeline = await this.repository.listTimeline(conversationId);
+    return { ok: true, status: 200, data: { conversation, messages, timeline } };
   }
 
   async sendMessage(body: unknown): Promise<PanelApiResult> {
@@ -124,6 +136,30 @@ export class PanelApi {
     const conversation = await this.repository.setFunnelStatus(conversationId, status);
     void this.funnelAutomation?.(conversationId, status);
     return { ok: true, status: 200, data: { conversationId, funnelStatus: conversation.funnelStatus } };
+  }
+
+  async setLeadSource(conversationId: string, body: unknown): Promise<PanelApiResult> {
+    const { leadSource } = body as { leadSource?: string | null };
+    if (leadSource !== null && leadSource !== undefined && !isLeadSource(leadSource)) {
+      return { ok: false, status: 400, error: `origem do lead invalida. Esperado: ${LEAD_SOURCES.join(', ')}` };
+    }
+    const conversation = await this.repository.setLeadSource(conversationId, leadSource ?? null);
+    this.logger(`[${conversationId}] origem do lead definida como ${conversation.leadSource ?? 'n/a'}.`);
+    return { ok: true, status: 200, data: { conversationId, leadSource: conversation.leadSource } };
+  }
+
+  async markLost(conversationId: string, body: unknown): Promise<PanelApiResult> {
+    const { lostReason } = body as { lostReason?: string };
+    if (!lostReason || !isLostReason(lostReason)) {
+      return { ok: false, status: 400, error: `motivo de perda invalido. Esperado: ${LOST_REASONS.join(', ')}` };
+    }
+    const conversation = await this.repository.markLost(conversationId, lostReason);
+    this.logger(`[${conversationId}] conversa marcada como perdida (${lostReason}).`);
+    return {
+      ok: true,
+      status: 200,
+      data: { conversationId, funnelStatus: conversation.funnelStatus, lostReason: conversation.lostReason },
+    };
   }
 
   async listAgents(): Promise<PanelApiResult> {

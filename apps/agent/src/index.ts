@@ -108,6 +108,9 @@ function logBootSummary(env: EnvConfig, container: AppContainer): void {
   console.log(`[boot] bling=${env.bling.baseURL} enabled=${env.bling.accessToken ? 'sim' : 'nao (no-op)'}`);
   console.log(`[boot] payment=${env.payment.baseURL}`);
   console.log(`[boot] crm=${env.crm.baseURL} enabled=${env.crm.enabled ? 'sim' : 'nao (no-op)'}`);
+  console.log(
+    `[boot] followup.inactivityHours=${env.followUp.inactivityHours} intervalMinutes=${Math.round(env.followUp.intervalMs / 60_000)}`,
+  );
   if (env.session.store === 'redis') {
     console.log(`[boot] redis.url=${sanitizeUrl(env.session.redisUrl)}`);
   }
@@ -149,6 +152,7 @@ function registerShutdownHandlers(
     console.log(`[boot] ${signal} recebido, encerrando...`);
 
     container.paymentExpiryJob.stop();
+    container.quoteFollowUpJob?.stop();
 
     server.close(() => {
       void (redisClient ? redisClient.quit() : Promise.resolve()).finally(() => {

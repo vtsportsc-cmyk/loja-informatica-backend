@@ -19,11 +19,14 @@ import { RedisSessionStore } from './agent/RedisSessionStore.js';
 //   POST /api/conversations/:id/handoff-> assumir/liberar atendimento (painel)
 //   POST /api/conversations/:id/status -> mover funil (painel; dispara Bling)
 //   POST /api/conversations/:id/department -> atribuir departamento/atendente
+//   POST /api/conversations/:id/source  -> definir origem do lead (painel)
+//   POST /api/conversations/:id/lost    -> marcar como perdido (painel)
 export function createAppServer(
   port = loadEnv().port,
   container: AppContainer = buildContainer(),
 ): Server {
   container.paymentExpiryJob.start();
+  container.quoteFollowUpJob?.start();
 
   return createServer((req, res) => {
     void handle(req, res, container);
@@ -162,6 +165,20 @@ async function handle(
     const id = departmentMatch[1];
     if (!id) return json(res, 400, { error: 'id ausente' });
     return panelRequest(req, res, container, async (panel, body) => panel.assignDepartment(id, body));
+  }
+
+  const sourceMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/source$/);
+  if (req.method === 'POST' && sourceMatch) {
+    const id = sourceMatch[1];
+    if (!id) return json(res, 400, { error: 'id ausente' });
+    return panelRequest(req, res, container, async (panel, body) => panel.setLeadSource(id, body));
+  }
+
+  const lostMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/lost$/);
+  if (req.method === 'POST' && lostMatch) {
+    const id = lostMatch[1];
+    if (!id) return json(res, 400, { error: 'id ausente' });
+    return panelRequest(req, res, container, async (panel, body) => panel.markLost(id, body));
   }
 
   return json(res, 404, { error: 'rota nao encontrada' });

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { formatBRL } from '@loja/catalog';
 import { FUNNEL_STATUSES, FUNNEL_STATUS_LABELS, FUNNEL_STATUS_COLORS } from '@/lib/funnel';
 import { DEPARTMENTS, DEPARTMENT_LABELS, DEPARTMENT_COLORS, isDepartment, type Department } from '@/lib/departments';
+import { LEAD_SOURCES, LEAD_SOURCE_LABELS, LOST_REASONS, LOST_REASON_LABELS, type LeadSource, type LostReason } from '@/lib/leads';
 
 type ModuleId = 'funil' | 'atendimento' | 'pedidos';
 
@@ -41,6 +42,10 @@ interface Conversation {
   customerName: string | null;
   funnelStatus: string;
   department: string | null;
+  leadSource: string | null;
+  lostReason: string | null;
+  lostAt: string | null;
+  lastFollowUpAt: string | null;
   humanMode: boolean;
   assignedAgentId: string | null;
   unreadCount: number;
@@ -57,9 +62,18 @@ interface Message {
   createdAt: string;
 }
 
+interface TimelineEvent {
+  id: string;
+  type: string;
+  title: string;
+  detail: string | null;
+  createdAt: string;
+}
+
 interface DetailResponse {
   conversation: Conversation;
   messages: Message[];
+  timeline: TimelineEvent[];
 }
 
 const MODULES: Array<{ id: ModuleId; label: string; hint: string }> = [
@@ -94,6 +108,9 @@ export default function CrmPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pendingLostId, setPendingLostId] = useState<string | null>(null);
+  const [lostReasonDraft, setLostReasonDraft] = useState<LostReason>('OUTRO');
+  const [leadSourceDraft, setLeadSourceDraft] = useState<string>('none');
 
   useEffect(() => {
     setAgentName(localStorage.getItem('crm-agent-name') ?? '');
@@ -130,6 +147,7 @@ export default function CrmPage() {
       setStatusDraft(body.conversation.funnelStatus);
       setDepartmentDraft(body.conversation.department ?? 'none');
       setAgentDraft(body.conversation.assignedAgentId ?? 'none');
+      setLeadSourceDraft(body.conversation.leadSource ?? 'none');
     } else {
       setError(body.error ?? 'falha ao carregar a conversa');
     }
@@ -178,6 +196,10 @@ export default function CrmPage() {
 
   async function changeStatus() {
     if (!selectedId || !statusDraft) return;
+    if (statusDraft === 'CANCELADO') {
+      setPendingLostId(selectedId);
+      return;
+    }
     const res = await fetch(`/api/crm/conversations/${encodeURIComponent(selectedId)}/status`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -189,6 +211,42 @@ export default function CrmPage() {
     } else {
       const body = await res.json().catch(() => ({}));
       setError(body.error ?? 'falha ao atualizar o funil');
+    }
+  }
+
+  async function confirmLost() {
+    if (!pendingLostId) return;
+    const res = await fetch(`/api/crm/conversations/${encodeURIComponent(pendingLostId)}/lost`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ lostReason: lostReasonDraft }),
+    });
+    const id = pendingLostId;
+    setPendingLostId(null);
+    if (res.ok) {
+      setError(null);
+      await openConversation(id);
+      await refreshList();
+    } else {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error ?? 'falha ao marcar como perdido');
+    }
+  }
+
+  async function saveLeadSource() {
+    if (!selectedId) return;
+    const res = await fetch(`/api/crm/conversations/${encodeURIComponent(selectedId)}/source`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ leadSource: leadSourceDraft === 'none' ? null : leadSourceDraft }),
+    });
+    if (res.ok) {
+      setError(null);
+      await openConversation(selectedId);
+      await refreshList();
+    } else {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error ?? 'falha ao salvar a origem do lead');
     }
   }
 
@@ -540,6 +598,33 @@ export default function CrmPage() {
 
                 <div>
                   <h3 className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                    Origem do lead
+                  </h3>
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <select
+                      className="select !py-1.5 !text-xs"
+                      value={leadSourceDraft}
+                      onChange={(e) => setLeadSourceDraft(e.target.value)}
+                      title="Origem do lead"
+                    >
+                      <option value="none">Sem origem</option>
+                      {LEAD_SOURCES.map((s) => (
+                        <option key={s} value={s}>
+                          {LEAD_SOURCE_LABELS[s]}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="btn-ghost !px-2 !py-1 !text-[11px]"
+                      onClick={() => void saveLeadSource()}
+                    >
+                      Salvar
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
                     Funil
                   </h3>
                   <div className="mt-1.5 flex items-center gap-2">
@@ -558,6 +643,15 @@ export default function CrmPage() {
                       Salvar
                     </button>
                   </div>
+                  {selected.funnelStatus === 'CANCELADO' && (
+                    <p className="mt-1.5 rounded bg-red-950/60 px-2 py-1 text-[10px] text-red-300">
+                      Pedido perdido
+                      {selected.lostReason
+                        ? ` — ${LOST_REASON_LABELS[selected.lostReason as LostReason] ?? selected.lostReason}`
+                        : ''}
+                      {selected.lostAt ? ` · ${fmtDate(selected.lostAt)}` : ''}
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -572,6 +666,13 @@ export default function CrmPage() {
                     </p>
                   )}
                 </div>
+
+                <div>
+                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                    Timeline
+                  </h3>
+                  <Timeline events={detail?.timeline ?? []} />
+                </div>
               </div>
             )}
           </div>
@@ -582,6 +683,19 @@ export default function CrmPage() {
           stats={ordersStats}
           onOpen={openConversationInChat}
           onEmit={(id) => void emitOrder(id)}
+        />
+      )}
+
+      {pendingLostId && (
+        <LostReasonModal
+          customerName={selected?.customerName ?? null}
+          value={lostReasonDraft}
+          onChange={(r) => setLostReasonDraft(r)}
+          onConfirm={() => void confirmLost()}
+          onCancel={() => {
+            setPendingLostId(null);
+            setStatusDraft(detail?.conversation.funnelStatus ?? '');
+          }}
         />
       )}
     </div>
@@ -826,6 +940,109 @@ function StatCard({ label, value }: { label: string; value: string }) {
     <div className="card">
       <p className="text-[10px] uppercase tracking-wider text-zinc-400">{label}</p>
       <p className="mt-0.5 text-lg font-black text-zinc-100">{value}</p>
+    </div>
+  );
+}
+
+const TIMELINE_TYPE_META: Record<string, { label: string; color: string }> = {
+  CONVERSATION_CREATED: { label: 'Conversa', color: 'bg-zinc-500' },
+  QUOTE_CREATED: { label: 'Orçamento', color: 'bg-brand' },
+  FUNNEL_STATUS_CHANGED: { label: 'Funil', color: 'bg-slate-400' },
+  HANDOFF: { label: 'Atendimento', color: 'bg-blue-500' },
+  ORDER_EMITTED: { label: 'Pedido', color: 'bg-emerald-500' },
+  LEAD_LOST: { label: 'Perdido', color: 'bg-red-500' },
+  FOLLOW_UP_SENT: { label: 'Follow-up', color: 'bg-amber-500' },
+};
+
+function Timeline({ events }: { events: TimelineEvent[] }) {
+  if (events.length === 0) {
+    return (
+      <p className="mt-1.5 text-xs text-zinc-500">
+        Sem atividades registradas nesta conversa ainda.
+      </p>
+    );
+  }
+  return (
+    <ol className="mt-1.5 space-y-2">
+      {events.map((ev) => {
+        const meta = TIMELINE_TYPE_META[ev.type] ?? { label: ev.type, color: 'bg-zinc-500' };
+        return (
+          <li key={ev.id} className="relative flex gap-2 pl-4">
+            <span
+              className={`absolute left-0 top-1 h-2 w-2 rounded-full ${meta.color}`}
+              aria-hidden
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold leading-tight text-zinc-200">{ev.title}</p>
+              {ev.detail && (
+                <p className="mt-0.5 text-[10px] leading-snug text-zinc-400">{ev.detail}</p>
+              )}
+              <p className="mt-0.5 text-[9px] text-zinc-500">
+                <span className="rounded bg-night-800 px-1">{meta.label}</span>{' '}
+                {fmtDate(ev.createdAt)}
+              </p>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function LostReasonModal({
+  customerName,
+  value,
+  onChange,
+  onConfirm,
+  onCancel,
+}: {
+  customerName: string | null;
+  value: LostReason;
+  onChange: (r: LostReason) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-night-950/80 p-4">
+      <div className="card w-full max-w-sm">
+        <h3 className="text-sm font-bold">Marcar como perdido</h3>
+        <p className="mt-1 text-xs text-zinc-400">
+          A conversa de <span className="font-semibold text-zinc-200">{customerName ?? '—'}</span> será
+          movida para <span className="font-semibold text-red-300">Cancelado / Perdido</span>.
+        </p>
+        <p className="mt-3 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+          Motivo da perda
+        </p>
+        <div className="mt-1.5 space-y-1.5">
+          {LOST_REASONS.map((r) => (
+            <label
+              key={r}
+              className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-colors ${
+                value === r
+                  ? 'border-red-500/60 bg-red-950/40 text-red-200'
+                  : 'border-night-700 bg-night-800 text-zinc-300 hover:border-night-500'
+              }`}
+            >
+              <input
+                type="radio"
+                name="lost-reason"
+                className="accent-red-500"
+                checked={value === r}
+                onChange={() => onChange(r)}
+              />
+              {LOST_REASON_LABELS[r]}
+            </label>
+          ))}
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={onCancel}>
+            Cancelar
+          </button>
+          <button className="btn-primary !px-3 !py-1.5 !text-xs" onClick={onConfirm}>
+            Confirmar perda
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
