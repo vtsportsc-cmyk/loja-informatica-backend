@@ -45,8 +45,10 @@ services:
       DATABASE_SAVE_DATA_CHAT_MESSAGES: "true"
       WEBHOOK_GLOBAL_URL: http://host.docker.internal:3000/webhooks/whatsapp
       WEBHOOK_GLOBAL_ENABLED: "true"
+      # BY_EVENTS=false: o agente registra apenas a rota exata /webhooks/whatsapp;
+      # com BY_EVENTS=true a Evolution anexa o nome do evento a URL (404 no agente).
       WEBHOOK_EVENTS: '["MESSAGES_UPSERT","QRCODE_UPDATED","CONNECTION_UPDATE"]'
-      WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "true"
+      WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "false"
       WEBHOOK_GLOBAL_WEBHOOK_INTERNAL_LOG: "false"
       WEBHOOK_GLOBAL_WEBHOOK_ENABLE_INSTANCE_LOG: "false"
       LOG_LEVEL: ERROR
