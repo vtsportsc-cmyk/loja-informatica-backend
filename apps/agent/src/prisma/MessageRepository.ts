@@ -44,6 +44,13 @@ export interface TimelineEventRecord {
   createdAt: string;
 }
 
+export interface ConversationNoteRecord {
+  id: string;
+  agentId: string | null;
+  text: string;
+  createdAt: string;
+}
+
 export interface AgentRecord {
   id: string;
   name: string;
@@ -135,6 +142,10 @@ export interface IMessageRepository {
   markLost(conversationId: string, lostReason: string): Promise<ConversationRecord>;
   /** Historico cronologico de atividades da conversa (timeline unificado). */
   listTimeline(conversationId: string): Promise<TimelineEventRecord[]>;
+  /** Registra uma anotacao interna do atendente na conversa. */
+  addNote(conversationId: string, input: { agentId?: string | null; text: string }): Promise<ConversationNoteRecord>;
+  /** Lista as anotações internas da conversa (mais recentes primeiro). */
+  listNotes(conversationId: string): Promise<ConversationNoteRecord[]>;
   /** Conversas ALTA_VALOR com orcamento e sem interacao desde `since` (e sem follow-up recente). */
   listPendingFollowUp(since: Date): Promise<ConversationRecord[]>;
   /** Registra o follow-up de reengajamento e evita novo envio imediato. */
@@ -431,6 +442,38 @@ export class PrismaMessageRepository implements IMessageRepository {
     );
   }
 
+  async addNote(
+    conversationId: string,
+    input: { agentId?: string | null; text: string },
+  ): Promise<ConversationNoteRecord> {
+    const text = input.text.trim();
+    if (!text) throw new Error('anotacao nao pode ser vazia');
+    const note = await this.prisma.conversationNote.create({
+      data: { conversationId, agentId: input.agentId ?? null, text },
+    });
+    await this.addEvent(
+      conversationId,
+      'NOTE_ADDED',
+      'Anotação interna',
+      input.agentId ? `Nota de ${input.agentId}: ${truncate(text, 120)}` : truncate(text, 120),
+    );
+    return { id: note.id, agentId: note.agentId, text: note.text, createdAt: note.createdAt.toISOString() };
+  }
+
+  async listNotes(conversationId: string): Promise<ConversationNoteRecord[]> {
+    const notes = await this.prisma.conversationNote.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    return notes.map((n) => ({
+      id: n.id,
+      agentId: n.agentId,
+      text: n.text,
+      createdAt: n.createdAt.toISOString(),
+    }));
+  }
+
   private async addEvent(
     conversationId: string,
     type: string,
@@ -603,6 +646,9 @@ export class InMemoryMessageRepository implements IMessageRepository {
     at: string;
   }> = [];
   private timelineCounter = 0;
+  /** Anotações internas dos atendentes. */
+  private notes: Array<{ conversationId: string } & ConversationNoteRecord> = [];
+  private noteCounter = 0;
 
   private addEvent(
     conversationId: string,
@@ -832,6 +878,36 @@ export class InMemoryMessageRepository implements IMessageRepository {
     );
   }
 
+  async addNote(
+    conversationId: string,
+    input: { agentId?: string | null; text: string },
+  ): Promise<ConversationNoteRecord> {
+    const text = input.text.trim();
+    if (!text) throw new Error('anotacao nao pode ser vazia');
+    this.noteCounter += 1;
+    const note: ConversationNoteRecord = {
+      id: `note-${this.noteCounter}`,
+      agentId: input.agentId ?? null,
+      text,
+      createdAt: new Date().toISOString(),
+    };
+    this.notes.push({ conversationId, ...note });
+    this.addEvent(
+      conversationId,
+      'NOTE_ADDED',
+      'Anotação interna',
+      input.agentId ? `Nota de ${input.agentId}: ${truncate(text, 120)}` : truncate(text, 120),
+    );
+    return note;
+  }
+
+  async listNotes(conversationId: string): Promise<ConversationNoteRecord[]> {
+    return this.notes
+      .filter((n) => n.conversationId === conversationId)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+      .map(({ conversationId: _c, ...note }) => ({ ...note }));
+  }
+
   async setDepartment(
     conversationId: string,
     opts: { department?: string | null; assignedAgentId?: string | null },
@@ -1018,4 +1094,8 @@ const DEMO_AGENTS: AgentRecord[] = [
 
 function normalizePhone(phone: string): string {
   return phone.replace(/@s\.whatsapp\.net$/i, '').replace(/[^\d]/g, '');
+}
+
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }

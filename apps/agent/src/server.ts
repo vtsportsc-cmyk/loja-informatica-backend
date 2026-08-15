@@ -21,6 +21,7 @@ import { RedisSessionStore } from './agent/RedisSessionStore.js';
 //   POST /api/conversations/:id/department -> atribuir departamento/atendente
 //   POST /api/conversations/:id/source  -> definir origem do lead (painel)
 //   POST /api/conversations/:id/lost    -> marcar como perdido (painel)
+//   POST /api/conversations/:id/notes   -> registrar anotacao interna (painel)
 export function createAppServer(
   port = loadEnv().port,
   container: AppContainer = buildContainer(),
@@ -179,6 +180,13 @@ async function handle(
     const id = lostMatch[1];
     if (!id) return json(res, 400, { error: 'id ausente' });
     return panelRequest(req, res, container, async (panel, body) => panel.markLost(id, body));
+  }
+
+  const notesMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/notes$/);
+  if (req.method === 'POST' && notesMatch) {
+    const id = notesMatch[1];
+    if (!id) return json(res, 400, { error: 'id ausente' });
+    return panelRequest(req, res, container, async (panel, body) => panel.addNote(id, body));
   }
 
   return json(res, 404, { error: 'rota nao encontrada' });

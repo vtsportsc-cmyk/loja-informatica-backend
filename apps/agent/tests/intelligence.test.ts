@@ -150,6 +150,55 @@ describe('Timeline unificada de atividades', () => {
   });
 });
 
+describe('Anotações internas do atendente', () => {
+  it('addNote persiste e dispara evento NOTE_ADDED na timeline', async () => {
+    const repository = new InMemoryMessageRepository();
+    const conv = await repository.ensureConversation('5511999991015', 'Cliente Negociacao');
+
+    const note = await repository.addNote(conv.id, {
+      agentId: 'agent-ana',
+      text: 'Cliente pediu desconto de 10% no PIX para fechar hoje.',
+    });
+    expect(note.text).toContain('desconto');
+    expect(note.agentId).toBe('agent-ana');
+
+    const notes = await repository.listNotes(conv.id);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.text).toBe(note.text);
+
+    const timeline = await repository.listTimeline(conv.id);
+    expect(timeline.some((e) => e.type === 'NOTE_ADDED')).toBe(true);
+  });
+
+  it('rejeita anotacao vazia', async () => {
+    const repository = new InMemoryMessageRepository();
+    const conv = await repository.ensureConversation('5511999991016');
+    await expect(repository.addNote(conv.id, { text: '   ' })).rejects.toThrow('anotacao nao pode ser vazia');
+  });
+
+  it('PanelApi.addNote valida texto e getConversation expoe as notas', async () => {
+    const repository = new InMemoryMessageRepository();
+    const { panel } = buildPanel(repository);
+    const conv = await repository.ensureConversation('5511999991017');
+
+    const bad = await panel.addNote(conv.id, { agentId: 'agent-bruno', text: '' });
+    expect(bad.ok).toBe(false);
+    expect(bad.status).toBe(400);
+
+    const res = await panel.addNote(conv.id, {
+      agentId: 'agent-bruno',
+      text: 'Reagendar ligação para amanhã às 10h.',
+    });
+    expect(res.ok).toBe(true);
+
+    const detail = await panel.getConversation(conv.id);
+    expect(detail.ok).toBe(true);
+    const data = detail.data as { notes: Array<{ text: string }> };
+    expect(data.notes).toHaveLength(1);
+    expect(data.notes[0]?.text).toContain('Reagendar');
+  });
+});
+
 describe('Follow-up de orcamentos inativos', () => {
   const now = new Date('2026-01-15T12:00:00.000Z');
 

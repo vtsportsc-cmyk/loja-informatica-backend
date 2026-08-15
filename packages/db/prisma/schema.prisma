@@ -52,6 +52,7 @@ enum ConversationEventType {
   ORDER_EMITTED
   LEAD_LOST
   FOLLOW_UP_SENT
+  NOTE_ADDED
 }
 
 model Customer {
@@ -100,12 +101,24 @@ model Conversation {
 
   messages Message[]
   events   ConversationEvent[]
+  notes    ConversationNote[]
   lead     Lead?
   quote    Quote?
 
   @@index([funnelStatus])
   @@index([department])
   @@index([lastMessageAt])
+}
+
+model ConversationNote {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  agentId        String?
+  text           String
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
 }
 
 model ConversationEvent {

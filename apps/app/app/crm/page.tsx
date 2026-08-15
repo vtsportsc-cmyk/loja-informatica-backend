@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { formatBRL } from '@loja/catalog';
 import { FUNNEL_STATUSES, FUNNEL_STATUS_LABELS, FUNNEL_STATUS_COLORS } from '@/lib/funnel';
 import { DEPARTMENTS, DEPARTMENT_LABELS, DEPARTMENT_COLORS, isDepartment, type Department } from '@/lib/departments';
@@ -70,10 +71,18 @@ interface TimelineEvent {
   createdAt: string;
 }
 
+interface Note {
+  id: string;
+  agentId: string | null;
+  text: string;
+  createdAt: string;
+}
+
 interface DetailResponse {
   conversation: Conversation;
   messages: Message[];
   timeline: TimelineEvent[];
+  notes: Note[];
 }
 
 const MODULES: Array<{ id: ModuleId; label: string; hint: string }> = [
@@ -111,6 +120,10 @@ export default function CrmPage() {
   const [pendingLostId, setPendingLostId] = useState<string | null>(null);
   const [lostReasonDraft, setLostReasonDraft] = useState<LostReason>('OUTRO');
   const [leadSourceDraft, setLeadSourceDraft] = useState<string>('none');
+  const [viewMode, setViewMode] = useState<'kanban' | 'table'>('kanban');
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<'resumo' | 'anotacoes'>('resumo');
+  const [noteDraft, setNoteDraft] = useState('');
 
   useEffect(() => {
     setAgentName(localStorage.getItem('crm-agent-name') ?? '');
@@ -137,6 +150,17 @@ export default function CrmPage() {
     void refreshList();
     void refreshAgents();
   }, [refreshList, refreshAgents]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((open) => !open);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const openConversation = useCallback(async (id: string) => {
     setSelectedId(id);
@@ -250,6 +274,23 @@ export default function CrmPage() {
     }
   }
 
+  async function saveNote() {
+    if (!selectedId || !noteDraft.trim()) return;
+    const res = await fetch(`/api/crm/conversations/${encodeURIComponent(selectedId)}/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agentId: agentName.trim() || null, text: noteDraft.trim() }),
+    });
+    if (res.ok) {
+      setNoteDraft('');
+      setError(null);
+      await openConversation(selectedId);
+    } else {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error ?? 'falha ao salvar a anotação');
+    }
+  }
+
   async function saveDepartment() {
     if (!selectedId) return;
     const res = await fetch(
@@ -288,6 +329,13 @@ export default function CrmPage() {
   }
 
   const selected = detail?.conversation ?? null;
+  const agentLabel = useCallback(
+    (id: string | null): string => {
+      if (!id) return '—';
+      return agents.find((a) => a.id === id)?.name ?? id;
+    },
+    [agents],
+  );
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return conversations.filter((c) => {
@@ -338,6 +386,16 @@ export default function CrmPage() {
           </nav>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            className="btn-ghost hidden items-center gap-2 !px-3 !py-1.5 !text-xs sm:flex"
+            onClick={() => setPaletteOpen(true)}
+            title="Busca rápida (Ctrl+K)"
+          >
+            <span>Buscar</span>
+            <kbd className="rounded border border-night-600 bg-night-800 px-1 font-mono text-[9px] text-zinc-400">
+              Ctrl+K
+            </kbd>
+          </button>
           <input
             className="input w-52"
             placeholder="Seu nome (agente)"
@@ -365,7 +423,34 @@ export default function CrmPage() {
       {loading ? (
         <p className="py-16 text-center text-sm text-zinc-500">Carregando operações...</p>
       ) : module === 'funil' ? (
-        <Kanban conversations={conversations} onOpen={openConversationInChat} />
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5 rounded-lg bg-night-800 p-1">
+              <button
+                onClick={() => setViewMode('kanban')}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  viewMode === 'kanban' ? 'bg-brand text-night-950' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Kanban
+              </button>
+              <button
+                onClick={() => setViewMode('table')}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  viewMode === 'table' ? 'bg-brand text-night-950' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Tabela
+              </button>
+            </div>
+            <span className="text-[10px] text-zinc-500">{conversations.length} conversas</span>
+          </div>
+          {viewMode === 'kanban' ? (
+            <Kanban conversations={conversations} onOpen={openConversationInChat} />
+          ) : (
+            <DenseTable conversations={conversations} agents={agents} onOpen={openConversationInChat} />
+          )}
+        </div>
       ) : module === 'atendimento' ? (
         <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[300px_1fr_320px]">
           <div className="card flex min-h-0 flex-col overflow-hidden !p-0">
@@ -539,11 +624,36 @@ export default function CrmPage() {
             )}
           </div>
 
-          <div className="card min-h-0 overflow-y-auto !p-0">
+          <div className="card flex min-h-0 flex-col overflow-hidden !p-0">
             {!selected ? (
               <p className="p-4 text-xs text-zinc-500">Contexto do cliente aparecerá aqui.</p>
             ) : (
-              <div className="space-y-3 p-3">
+              <>
+                <div className="flex gap-1 border-b border-night-700 p-2">
+                  <button
+                    onClick={() => setSidebarTab('resumo')}
+                    className={`rounded-md px-3 py-1 text-[11px] font-semibold transition-colors ${
+                      sidebarTab === 'resumo' ? 'bg-brand text-night-950' : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    Resumo
+                  </button>
+                  <button
+                    onClick={() => setSidebarTab('anotacoes')}
+                    className={`rounded-md px-3 py-1 text-[11px] font-semibold transition-colors ${
+                      sidebarTab === 'anotacoes' ? 'bg-brand text-night-950' : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    Anotações
+                    {detail && detail.notes.length > 0 && (
+                      <span className="ml-1 rounded bg-night-700 px-1 text-[9px] text-zinc-300">
+                        {detail.notes.length}
+                      </span>
+                    )}
+                  </button>
+                </div>
+                {sidebarTab === 'resumo' ? (
+                  <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
                 <div>
                   <h3 className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
                     Atribuição
@@ -673,7 +783,19 @@ export default function CrmPage() {
                   </h3>
                   <Timeline events={detail?.timeline ?? []} />
                 </div>
-              </div>
+                  </div>
+                ) : (
+                  <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                    <NotesPanel
+                      notes={detail?.notes ?? []}
+                      agentName={agentName}
+                      draft={noteDraft}
+                      onDraftChange={setNoteDraft}
+                      onSave={() => void saveNote()}
+                    />
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -695,6 +817,17 @@ export default function CrmPage() {
           onCancel={() => {
             setPendingLostId(null);
             setStatusDraft(detail?.conversation.funnelStatus ?? '');
+          }}
+        />
+      )}
+
+      {paletteOpen && (
+        <CommandPalette
+          conversations={conversations}
+          onClose={() => setPaletteOpen(false)}
+          onSelect={(id) => {
+            setPaletteOpen(false);
+            void openConversationInChat(id);
           }}
         />
       )}
@@ -1044,5 +1177,321 @@ function LostReasonModal({
         </div>
       </div>
     </div>
+  );
+}
+
+function DenseTable({
+  conversations,
+  agents,
+  onOpen,
+}: {
+  conversations: Conversation[];
+  agents: Agent[];
+  onOpen: (id: string) => void;
+}) {
+  const rows = useMemo(
+    () => [...conversations].sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '')),
+    [conversations],
+  );
+  const agentLabel = useCallback(
+    (id: string | null): string => {
+      if (!id) return '—';
+      return agents.find((a) => a.id === id)?.name ?? id;
+    },
+    [agents],
+  );
+
+  return (
+    <div className="card min-h-0 flex-1 overflow-auto !p-0">
+      <table className="w-full border-collapse text-xs">
+        <thead className="sticky top-0 z-10 bg-night-800 text-[10px] uppercase tracking-wider text-zinc-400">
+          <tr>
+            <th className="px-3 py-2 text-left">Cliente</th>
+            <th className="px-3 py-2 text-left">Telefone</th>
+            <th className="px-3 py-2 text-left">Peças Principais</th>
+            <th className="px-3 py-2 text-left">Valor PIX/Parcelado</th>
+            <th className="px-3 py-2 text-left">Status</th>
+            <th className="px-3 py-2 text-left">Atendente Responsável</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={6} className="px-3 py-10 text-center text-zinc-500">
+                Nenhuma conversa encontrada.
+              </td>
+            </tr>
+          )}
+          {rows.map((c) => {
+            const items = c.quote?.items ?? [];
+            const parts = items
+              .slice(0, 2)
+              .map((i) => `${i.quantity}x ${i.name}`)
+              .join(' · ');
+            return (
+              <tr
+                key={c.id}
+                onClick={() => onOpen(c.id)}
+                className="cursor-pointer border-t border-night-800 transition-colors hover:bg-brand/10"
+              >
+                <td className="px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${FUNNEL_STATUS_COLORS[c.funnelStatus as keyof typeof FUNNEL_STATUS_COLORS] ?? 'bg-zinc-500'}`}
+                    />
+                    <span className="font-semibold text-zinc-100">
+                      {c.customerName || c.whatsappId}
+                    </span>
+                    {c.quote && (
+                      <span className="font-mono text-[10px] text-brand">{c.quote.code}</span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-3 py-2 text-zinc-400">{c.whatsappId}</td>
+                <td className="max-w-[260px] truncate px-3 py-2 text-zinc-300">
+                  {items.length === 0 ? (
+                    <span className="text-zinc-600">—</span>
+                  ) : (
+                    <>
+                      {parts}
+                      {items.length > 2 && (
+                        <span className="text-zinc-500"> +{items.length - 2} itens</span>
+                      )}
+                    </>
+                  )}
+                </td>
+                <td className="px-3 py-2">
+                  {c.quote ? (
+                    <>
+                      <span className="font-semibold text-brand">
+                        {formatBRL(c.quote.pixTotalCents)}
+                      </span>
+                      <span className="ml-1 text-[10px] text-zinc-400">
+                        ou {c.quote.installments}x {formatBRL(c.quote.monthlyValueCents)}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-zinc-600">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-2">
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                      FUNNEL_STATUS_COLORS[c.funnelStatus as keyof typeof FUNNEL_STATUS_COLORS] ?? 'bg-zinc-500'
+                    } bg-opacity-20 text-zinc-100`}
+                  >
+                    {FUNNEL_STATUS_LABELS[c.funnelStatus as keyof typeof FUNNEL_STATUS_LABELS] ?? c.funnelStatus}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-zinc-400">{agentLabel(c.assignedAgentId)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function NotesPanel({
+  notes,
+  agentName,
+  draft,
+  onDraftChange,
+  onSave,
+}: {
+  notes: Note[];
+  agentName: string;
+  draft: string;
+  onDraftChange: (v: string) => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="flex h-full flex-col">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+        {notes.length === 0 && (
+          <p className="py-6 text-center text-xs text-zinc-500">
+            Nenhuma anotação ainda. Registre observações da negociação aqui.
+          </p>
+        )}
+        {notes.map((n) => (
+          <div key={n.id} className="rounded-lg border border-night-700 bg-night-800 p-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold text-brand">
+                {n.agentId || 'Atendente'}
+              </span>
+              <span className="text-[9px] text-zinc-500">{fmtDate(n.createdAt)}</span>
+            </div>
+            <p className="mt-1 whitespace-pre-wrap text-xs leading-snug text-zinc-200">{n.text}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 border-t border-night-700 pt-2">
+        <textarea
+          className="input min-h-[72px] !text-xs"
+          placeholder={`Anotação interna${agentName ? ` (${agentName})` : ''}...`}
+          value={draft}
+          onChange={(e) => onDraftChange(e.target.value)}
+          onKeyDown={(e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') onSave();
+          }}
+        />
+        <div className="mt-1.5 flex justify-end">
+          <button
+            className="btn-primary !px-3 !py-1.5 !text-[11px]"
+            disabled={!draft.trim()}
+            onClick={onSave}
+          >
+            Salvar anotação
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CommandPalette({
+  conversations,
+  onClose,
+  onSelect,
+}: {
+  conversations: Conversation[];
+  onClose: () => void;
+  onSelect: (id: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [highlight, setHighlight] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return conversations.slice(0, 8);
+    return conversations
+      .filter((c) => {
+        const haystack = [
+          c.customerName ?? '',
+          c.whatsappId,
+          c.quote?.code ?? '',
+          ...(c.quote?.items ?? []).map((i) => i.name),
+        ]
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(q);
+      })
+      .slice(0, 8);
+  }, [conversations, query]);
+
+  useEffect(() => {
+    setHighlight(0);
+  }, [query]);
+
+  function onKeyDown(e: ReactKeyboardEvent) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlight((h) => Math.min(h + 1, results.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlight((h) => Math.max(h - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const hit = results[highlight];
+      if (hit) onSelect(hit.id);
+    } else if (e.key === 'Escape') {
+      onClose();
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-night-950/80 p-4 pt-[12vh]"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="card w-full max-w-xl overflow-hidden !p-0">
+        <div className="flex items-center gap-2 border-b border-night-700 px-3">
+          <span className="text-zinc-500">
+            <SearchIcon />
+          </span>
+          <input
+            ref={inputRef}
+            className="input !border-0 !bg-transparent !px-0 !py-3 !text-sm !shadow-none"
+            placeholder="Buscar por orçamento, cliente, telefone ou peça..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onKeyDown}
+          />
+          <kbd className="ml-auto rounded border border-night-600 bg-night-800 px-1 font-mono text-[9px] text-zinc-400">
+            Esc
+          </kbd>
+        </div>
+        <div className="max-h-[50vh] overflow-y-auto p-1.5">
+          {results.length === 0 && (
+            <p className="px-3 py-8 text-center text-xs text-zinc-500">
+              Nenhum resultado para “{query}”.
+            </p>
+          )}
+          {results.map((c, i) => {
+            const match = c.quote?.code ?? null;
+            return (
+              <button
+                key={c.id}
+                onClick={() => onSelect(c.id)}
+                onMouseEnter={() => setHighlight(i)}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                  i === highlight ? 'bg-brand/15' : 'hover:bg-night-800'
+                }`}
+              >
+                <span
+                  className={`h-2 w-2 shrink-0 rounded-full ${FUNNEL_STATUS_COLORS[c.funnelStatus as keyof typeof FUNNEL_STATUS_COLORS] ?? 'bg-zinc-500'}`}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-semibold text-zinc-100">
+                    {c.customerName || c.whatsappId}
+                  </span>
+                  <span className="block truncate text-[10px] text-zinc-500">
+                    {c.whatsappId}
+                    {c.quote && c.quote.items.length > 0
+                      ? ` · ${c.quote.items.slice(0, 2).map((i) => i.name).join(', ')}`
+                      : ''}
+                  </span>
+                </span>
+                {match && (
+                  <span className="shrink-0 rounded bg-brand/15 px-1.5 font-mono text-[10px] text-brand">
+                    {match}
+                  </span>
+                )}
+                <span className="shrink-0 text-[10px] text-zinc-500">
+                  {FUNNEL_STATUS_LABELS[c.funnelStatus as keyof typeof FUNNEL_STATUS_LABELS] ?? c.funnelStatus}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.35-4.35" />
+    </svg>
   );
 }

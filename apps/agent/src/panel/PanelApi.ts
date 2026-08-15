@@ -22,6 +22,7 @@ import type { FunnelStatusChangeHook } from '../agent/funnelAutomation.js';
 //   POST /api/conversations/:id/department  -> atribuir departamento/atendente
 //   POST /api/conversations/:id/source      -> definir origem do lead
 //   POST /api/conversations/:id/lost        -> marcar como perdido (CANCELADO)
+//   POST /api/conversations/:id/notes       -> registrar anotacao interna
 //   GET  /api/agents                        -> lista de atendentes ativos
 // Todas exigem o header `x-agent-key` (AGENT_API_KEY).
 // ============================================================================
@@ -76,7 +77,8 @@ export class PanelApi {
     }
     const messages = await this.repository.listMessages(conversationId);
     const timeline = await this.repository.listTimeline(conversationId);
-    return { ok: true, status: 200, data: { conversation, messages, timeline } };
+    const notes = await this.repository.listNotes(conversationId);
+    return { ok: true, status: 200, data: { conversation, messages, timeline, notes } };
   }
 
   async sendMessage(body: unknown): Promise<PanelApiResult> {
@@ -160,6 +162,16 @@ export class PanelApi {
       status: 200,
       data: { conversationId, funnelStatus: conversation.funnelStatus, lostReason: conversation.lostReason },
     };
+  }
+
+  async addNote(conversationId: string, body: unknown): Promise<PanelApiResult> {
+    const { agentId, text } = body as { agentId?: string; text?: string };
+    if (!text?.trim()) {
+      return { ok: false, status: 400, error: 'text e obrigatorio' };
+    }
+    const note = await this.repository.addNote(conversationId, { agentId: agentId ?? null, text });
+    this.logger(`[${conversationId}] anotacao interna registrada por ${agentId ?? 'n/a'}.`);
+    return { ok: true, status: 200, data: { note } };
   }
 
   async listAgents(): Promise<PanelApiResult> {
