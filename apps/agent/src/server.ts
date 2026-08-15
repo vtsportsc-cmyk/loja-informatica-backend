@@ -11,6 +11,8 @@ import { collectSystemStatus } from './routes/health.js';
 //   GET  /health                       -> saude do servico
 //   GET  /metrics                      -> Prometheus text (observabilidade)
 //   POST /webhooks/whatsapp            -> mensagem do cliente via Evolution API
+//   GET  /webhooks/instagram           -> validacao do webhook (hub.challenge)
+//   POST /webhooks/instagram           -> comentario/Direct do Instagram (lead)
 //   POST /webhooks/payment             -> notificacao de pagamento (PIX / cartao)
 //   POST /webhooks/crm/follow-up       -> reengajamento disparado pelo CRM
 //   POST /api/messages                 -> vendedor envia msg (painel CRM)
@@ -74,6 +76,38 @@ async function handle(
       const raw = await readBody(req);
       const signature = req.headers['x-signature'] as string | undefined;
       const result = await container.evolutionWebhook.handle(raw, signature);
+      if (!result.ok) {
+        return json(res, 400, { error: result.error ?? 'falha ao processar' });
+      }
+      return json(res, 200, { ok: true, handled: result.handled ?? false });
+    } catch (err) {
+      return json(res, 400, { error: (err as Error).message });
+    }
+  }
+
+  // Verificacao do webhook do Meta Graph API (hub.challenge) SEMPRE responde,
+  // mesmo com a automacao desabilitada, para permitir a assinatura do app.
+  if (req.method === 'GET' && url.pathname === '/webhooks/instagram') {
+    const mode = url.searchParams.get('hub.mode');
+    const token = url.searchParams.get('hub.verify_token');
+    const challenge = url.searchParams.get('hub.challenge');
+    if (mode === 'subscribe' && token === container.instagramVerifyToken && challenge) {
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end(challenge);
+      return;
+    }
+    return json(res, 403, { error: 'verificacao do webhook falhou' });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/webhooks/instagram') {
+    if (!container.instagramWebhook) {
+      return json(res, 501, { error: 'webhook instagram nao configurado' });
+    }
+    try {
+      const raw = await readBody(req);
+      const signature = (req.headers['x-hub-signature-256'] as string | undefined) ??
+        (req.headers['x-signature'] as string | undefined);
+      const result = await container.instagramWebhook.handle(raw, signature);
       if (!result.ok) {
         return json(res, 400, { error: result.error ?? 'falha ao processar' });
       }

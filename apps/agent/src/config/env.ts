@@ -41,6 +41,13 @@ export interface EnvConfig {
   };
   erp: { baseURL: string; apiToken: string };
   evolution: { baseURL: string; instance: string; apiKey: string; webhookSecret: string };
+  instagram: {
+    enabled: boolean;
+    instance: string;
+    webhookSecret: string;
+    verifyToken: string;
+    appUrl: string;
+  };
   databaseUrl: string;
   agentApiKey: string;
   storeWhatsappNumber: string;
@@ -94,6 +101,13 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): EnvConfig {
       instance: v.EVOLUTION_INSTANCE,
       apiKey: v.EVOLUTION_API_KEY,
       webhookSecret: v.EVOLUTION_WEBHOOK_SECRET,
+    },
+    instagram: {
+      enabled: v.INSTAGRAM_AUTOMATION_ENABLED,
+      instance: v.EVOLUTION_INSTAGRAM_INSTANCE,
+      webhookSecret: v.INSTAGRAM_WEBHOOK_SECRET,
+      verifyToken: v.INSTAGRAM_WEBHOOK_TOKEN,
+      appUrl: v.APP_PUBLIC_URL,
     },
     databaseUrl: v.DATABASE_URL,
     agentApiKey: v.AGENT_API_KEY,

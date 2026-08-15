@@ -26,6 +26,10 @@ export interface StoredQuote {
   installments: number;
   monthlyValueCents: number;
   parceledTotalCents: number;
+  /** Atribuicao de trafego capturada na URL (?utm_source=...&utm_campaign=...). */
+  utmSource: string | null;
+  utmMedium: string | null;
+  utmCampaign: string | null;
   createdAt: string;
 }
 
@@ -76,10 +80,26 @@ async function persistToDb(quote: StoredQuote): Promise<void> {
       create: { whatsappId, name: quote.customerName ?? null },
     });
 
+    // Conversa do lead no CRM (funil/kanban): origem BUILDER + UTMs. Se o
+    // cliente ja tem conversa (ex.: veio pelo WhatsApp antes), mantem a
+    // primeira origem e apenas vincula o orcamento a ela.
+    const conversation = await prisma.conversation.upsert({
+      where: { customerId: customer.id },
+      update: {},
+      create: {
+        customerId: customer.id,
+        leadSource: 'BUILDER',
+        utmSource: quote.utmSource,
+        utmMedium: quote.utmMedium,
+        utmCampaign: quote.utmCampaign,
+      },
+    });
+
     await prisma.quote.create({
       data: {
         code: quote.code,
         customerId: customer.id,
+        conversationId: conversation.id,
         status: 'pending',
         totalCents: quote.subtotalCents,
         discountCents: quote.discountCents,
@@ -87,6 +107,9 @@ async function persistToDb(quote: StoredQuote): Promise<void> {
         installments: quote.installments,
         installmentValueCents: quote.monthlyValueCents,
         parceledTotalCents: quote.parceledTotalCents,
+        utmSource: quote.utmSource,
+        utmMedium: quote.utmMedium,
+        utmCampaign: quote.utmCampaign,
         items: {
           create: quote.items.map((item, index) => ({
             category: item.category,
@@ -111,6 +134,9 @@ export async function createQuote(input: {
   customerName?: string;
   customerPhone?: string;
   items: QuoteItemJson[];
+  utmSource?: string | null;
+  utmMedium?: string | null;
+  utmCampaign?: string | null;
 }): Promise<StoredQuote> {
   const summary = summarizeItems(input.items);
   const quote: StoredQuote = {
@@ -124,6 +150,9 @@ export async function createQuote(input: {
     installments: summary.installments,
     monthlyValueCents: summary.monthlyValueCents,
     parceledTotalCents: summary.parceledTotalCents,
+    utmSource: input.utmSource?.trim() || null,
+    utmMedium: input.utmMedium?.trim() || null,
+    utmCampaign: input.utmCampaign?.trim() || null,
     createdAt: new Date().toISOString(),
   };
   memoryStore.set(quote.code, quote);
@@ -166,6 +195,9 @@ export async function getQuote(code: string): Promise<StoredQuote | null> {
       installments: row.installments,
       monthlyValueCents: row.installmentValueCents,
       parceledTotalCents: row.parceledTotalCents,
+      utmSource: row.utmSource,
+      utmMedium: row.utmMedium,
+      utmCampaign: row.utmCampaign,
       createdAt: row.createdAt.toISOString(),
     };
   } catch (err) {

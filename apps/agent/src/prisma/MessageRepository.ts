@@ -25,6 +25,10 @@ export interface ConversationRecord {
   funnelStatus: string;
   department: string | null;
   leadSource: string | null;
+  /** Atribuicao de trafego (UTMs) capturada no "Monte seu PC" / Instagram. */
+  utmSource: string | null;
+  utmMedium: string | null;
+  utmCampaign: string | null;
   lostReason: string | null;
   lostAt: string | null;
   lastFollowUpAt: string | null;
@@ -101,6 +105,10 @@ export interface QuoteRecord {
   pixTotalCents: number;
   customer: { name: string | null; phone: string | null };
   items: QuoteItemRecord[];
+  /** Atribuicao de trafego (UTMs) capturada no "Monte seu PC". */
+  utmSource: string | null;
+  utmMedium: string | null;
+  utmCampaign: string | null;
 }
 
 /** Resumo do orcamento exposto ao painel de CRM (modulo Pedidos). */
@@ -111,6 +119,10 @@ export interface QuoteSummary {
   installments: number;
   monthlyValueCents: number;
   parceledTotalCents: number;
+  /** Atribuicao de trafego (UTMs) capturada no "Monte seu PC". */
+  utmSource: string | null;
+  utmMedium: string | null;
+  utmCampaign: string | null;
   blingOrderId: string | null;
   blingNumber: string | null;
   blingStatus: string | null;
@@ -120,7 +132,12 @@ export interface QuoteSummary {
 export interface IMessageRepository {
   /** Ping de saude do banco (SELECT 1 no PostgreSQL; true no modo memoria). */
   ping(): Promise<boolean>;
-  ensureConversation(whatsappId: string, name?: string | null): Promise<ConversationRecord>;
+  /** Garante uma conversa para o contato. `channel` define a origem do lead (whatsapp/instagram). */
+  ensureConversation(
+    whatsappId: string,
+    name?: string | null,
+    opts?: { channel?: 'whatsapp' | 'instagram' },
+  ): Promise<ConversationRecord>;
   getConversationById(id: string): Promise<ConversationRecord | null>;
   getConversationByWhatsapp(whatsappId: string): Promise<ConversationRecord | null>;
   listConversations(): Promise<ConversationRecord[]>;
@@ -177,7 +194,11 @@ export class PrismaMessageRepository implements IMessageRepository {
     }
   }
 
-  async ensureConversation(whatsappId: string, name?: string | null): Promise<ConversationRecord> {
+  async ensureConversation(
+    whatsappId: string,
+    name?: string | null,
+    opts?: { channel?: 'whatsapp' | 'instagram' },
+  ): Promise<ConversationRecord> {
     const clean = normalizePhone(whatsappId);
     const customer = await this.prisma.customer.upsert({
       where: { whatsappId: clean },
@@ -189,15 +210,21 @@ export class PrismaMessageRepository implements IMessageRepository {
       include: { customer: true, quote: { include: { items: true } } },
     });
     if (!conversation) {
+      const channel = opts?.channel ?? 'whatsapp';
       conversation = await this.prisma.conversation.create({
-        data: { customerId: customer.id, leadSource: 'WHATSAPP_DIRECT' },
+        data: {
+          customerId: customer.id,
+          leadSource: channel === 'instagram' ? 'INSTAGRAM' : 'WHATSAPP_DIRECT',
+        },
         include: { customer: true, quote: { include: { items: true } } },
       });
       await this.addEvent(
         conversation.id,
         'CONVERSATION_CREATED',
-        'Conversa iniciada',
-        'Cliente entrou em contato pelo WhatsApp',
+        channel === 'instagram' ? 'Conversa iniciada (Instagram)' : 'Conversa iniciada',
+        channel === 'instagram'
+          ? 'Cliente comentou no Instagram e recebeu o link do Monte seu PC'
+          : 'Cliente entrou em contato pelo WhatsApp',
       );
     }
     return toConversationRecord(conversation, customer.name, customer.whatsappId, mapQuoteSummary(conversation.quote));
@@ -545,6 +572,9 @@ export class PrismaMessageRepository implements IMessageRepository {
       totalCents: quote.totalCents,
       pixTotalCents: quote.pixTotalCents,
       customer: { name: quote.customer.name, phone: quote.customer.whatsappId },
+      utmSource: quote.utmSource,
+      utmMedium: quote.utmMedium,
+      utmCampaign: quote.utmCampaign,
       items: quote.items.map((item) => ({
         sku: item.sku,
         name: item.name,
@@ -617,6 +647,9 @@ export class PrismaMessageRepository implements IMessageRepository {
       totalCents: quote.totalCents,
       pixTotalCents: quote.pixTotalCents,
       customer: { name: quote.customer.name, phone: quote.customer.whatsappId },
+      utmSource: quote.utmSource,
+      utmMedium: quote.utmMedium,
+      utmCampaign: quote.utmCampaign,
       items: quote.items.map((item) => ({
         sku: item.sku,
         name: item.name,
@@ -696,7 +729,11 @@ export class InMemoryMessageRepository implements IMessageRepository {
     });
   }
 
-  async ensureConversation(whatsappId: string, name?: string | null): Promise<ConversationRecord> {
+  async ensureConversation(
+    whatsappId: string,
+    name?: string | null,
+    opts?: { channel?: 'whatsapp' | 'instagram' },
+  ): Promise<ConversationRecord> {
     const clean = normalizePhone(whatsappId);
     const existingId = this.whatsappIndex.get(clean);
     if (existingId) {
@@ -706,6 +743,7 @@ export class InMemoryMessageRepository implements IMessageRepository {
         return conv;
       }
     }
+    const channel = opts?.channel ?? 'whatsapp';
     const conv: ConversationRecord = {
       id: `conv-${this.conversations.size + 1}`,
       whatsappId: clean,
@@ -713,7 +751,10 @@ export class InMemoryMessageRepository implements IMessageRepository {
       customerName: name ?? null,
       funnelStatus: 'NOVO',
       department: null,
-      leadSource: 'WHATSAPP_DIRECT',
+      leadSource: channel === 'instagram' ? 'INSTAGRAM' : 'WHATSAPP_DIRECT',
+      utmSource: null,
+      utmMedium: null,
+      utmCampaign: null,
       lostReason: null,
       lostAt: null,
       lastFollowUpAt: null,
@@ -727,8 +768,10 @@ export class InMemoryMessageRepository implements IMessageRepository {
     this.addEvent(
       conv.id,
       'CONVERSATION_CREATED',
-      'Conversa iniciada',
-      'Cliente entrou em contato pelo WhatsApp',
+      channel === 'instagram' ? 'Conversa iniciada (Instagram)' : 'Conversa iniciada',
+      channel === 'instagram'
+        ? 'Cliente comentou no Instagram e recebeu o link do Monte seu PC'
+        : 'Cliente entrou em contato pelo WhatsApp',
     );
     return conv;
   }
@@ -993,7 +1036,7 @@ export class InMemoryMessageRepository implements IMessageRepository {
     quote: QuoteRecord,
     conversationId?: string,
     summary?: Partial<
-      Pick<QuoteSummary, 'installments' | 'monthlyValueCents' | 'parceledTotalCents' | 'blingOrderId' | 'blingNumber' | 'blingStatus'>
+      Pick<QuoteSummary, 'installments' | 'monthlyValueCents' | 'parceledTotalCents' | 'blingOrderId' | 'blingNumber' | 'blingStatus' | 'utmSource' | 'utmMedium' | 'utmCampaign'>
     >,
   ): void {
     this.quoteIndex.set(quote.code, quote);
@@ -1006,6 +1049,9 @@ export class InMemoryMessageRepository implements IMessageRepository {
         installments: summary?.installments ?? 1,
         monthlyValueCents: summary?.monthlyValueCents ?? quote.totalCents,
         parceledTotalCents: summary?.parceledTotalCents ?? quote.totalCents,
+        utmSource: summary?.utmSource ?? quote.utmSource,
+        utmMedium: summary?.utmMedium ?? quote.utmMedium,
+        utmCampaign: summary?.utmCampaign ?? quote.utmCampaign,
         blingOrderId: summary?.blingOrderId ?? null,
         blingNumber: summary?.blingNumber ?? null,
         blingStatus: summary?.blingStatus ?? null,
@@ -1045,6 +1091,9 @@ function toConversationRecord(
     funnelStatus: FunnelStatus;
     department: Department | null;
     leadSource: LeadSource | null;
+    utmSource: string | null;
+    utmMedium: string | null;
+    utmCampaign: string | null;
     lostReason: LostReason | null;
     lostAt: Date | null;
     lastFollowUpAt: Date | null;
@@ -1066,6 +1115,9 @@ function toConversationRecord(
     funnelStatus: conv.funnelStatus,
     department: conv.department,
     leadSource: conv.leadSource,
+    utmSource: conv.utmSource,
+    utmMedium: conv.utmMedium,
+    utmCampaign: conv.utmCampaign,
     lostReason: conv.lostReason,
     lostAt: conv.lostAt ? conv.lostAt.toISOString() : null,
     lastFollowUpAt: conv.lastFollowUpAt ? conv.lastFollowUpAt.toISOString() : null,
@@ -1084,6 +1136,9 @@ function mapQuoteSummary(quote: {
   installments: number;
   installmentValueCents: number;
   parceledTotalCents: number;
+  utmSource: string | null;
+  utmMedium: string | null;
+  utmCampaign: string | null;
   blingOrderId: string | null;
   blingNumber: string | null;
   blingStatus: string | null;
@@ -1097,6 +1152,9 @@ function mapQuoteSummary(quote: {
     installments: quote.installments,
     monthlyValueCents: quote.installmentValueCents,
     parceledTotalCents: quote.parceledTotalCents,
+    utmSource: quote.utmSource,
+    utmMedium: quote.utmMedium,
+    utmCampaign: quote.utmCampaign,
     blingOrderId: quote.blingOrderId,
     blingNumber: quote.blingNumber,
     blingStatus: quote.blingStatus,

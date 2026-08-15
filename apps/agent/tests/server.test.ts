@@ -131,6 +131,7 @@ async function startApp(script: ReturnType<typeof fullPurchaseScript> = fullPurc
     paymentExpiryJob,
     repository,
     evolutionWebhook,
+    instagramVerifyToken: 'loja_verify_token',
     panelApi,
   } as unknown as AppContainer;
 
@@ -347,6 +348,28 @@ describe('Server HTTP - health, webhooks e API do painel (e2e)', () => {
     expect(body.status.evolution.state).toBe('open');
     expect(body.status.evolution.status).toBe('ok');
     expect(body.status.llm.averageResponseMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('GET /webhooks/instagram valida o webhook do Meta Graph API (hub.challenge)', async () => {
+    const okRes = await fetch(
+      `${app.base}/webhooks/instagram?hub.mode=subscribe&hub.verify_token=loja_verify_token&hub.challenge=abc123`,
+    );
+    expect(okRes.status).toBe(200);
+    expect(await okRes.text()).toBe('abc123');
+
+    const badRes = await fetch(
+      `${app.base}/webhooks/instagram?hub.mode=subscribe&hub.verify_token=errado&hub.challenge=abc123`,
+    );
+    expect(badRes.status).toBe(403);
+  });
+
+  it('POST /webhooks/instagram responde 501 quando a automacao nao esta habilitada', async () => {
+    const res = await fetch(`${app.base}/webhooks/instagram`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ object: 'instagram' }),
+    });
+    expect(res.status).toBe(501);
   });
 
   it('retorna 404 para rotas desconhecidas', async () => {

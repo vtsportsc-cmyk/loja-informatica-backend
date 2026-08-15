@@ -10,6 +10,9 @@ export async function POST(req: Request) {
     customerName?: string;
     customerPhone?: string;
     items?: QuoteItemJson[];
+    utmSource?: string;
+    utmMedium?: string;
+    utmCampaign?: string;
   } | null;
 
   const items = Array.isArray(body?.items)
@@ -23,6 +26,9 @@ export async function POST(req: Request) {
     customerName: body?.customerName,
     customerPhone: body?.customerPhone,
     items,
+    utmSource: body?.utmSource,
+    utmMedium: body?.utmMedium,
+    utmCampaign: body?.utmCampaign,
   });
 
   const summaryText = items

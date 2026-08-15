@@ -13,7 +13,7 @@ import { DEPARTMENTS, DEPARTMENT_LABELS, DEPARTMENT_COLORS, isDepartment, type D
 import { LEAD_SOURCES, LEAD_SOURCE_LABELS, LOST_REASONS, LOST_REASON_LABELS, type LeadSource, type LostReason } from '@/lib/leads';
 import { SystemHealthBadge } from '@/components/system-health';
 
-type ModuleId = 'funil' | 'atendimento' | 'pedidos';
+type ModuleId = 'funil' | 'atendimento' | 'pedidos' | 'bi';
 
 interface Agent {
   id: string;
@@ -37,6 +37,9 @@ interface QuoteSummary {
   installments: number;
   monthlyValueCents: number;
   parceledTotalCents: number;
+  utmSource: string | null;
+  utmMedium: string | null;
+  utmCampaign: string | null;
   blingOrderId: string | null;
   blingNumber: string | null;
   blingStatus: string | null;
@@ -50,6 +53,9 @@ interface Conversation {
   funnelStatus: string;
   department: string | null;
   leadSource: string | null;
+  utmSource: string | null;
+  utmMedium: string | null;
+  utmCampaign: string | null;
   lostReason: string | null;
   lostAt: string | null;
   lastFollowUpAt: string | null;
@@ -95,6 +101,7 @@ const MODULES: Array<{ id: ModuleId; label: string; hint: string }> = [
   { id: 'funil', label: 'Funil de Vendas', hint: 'Kanban de leads' },
   { id: 'atendimento', label: 'Atendimento', hint: 'WhatsApp multi-atendente' },
   { id: 'pedidos', label: 'Pedidos', hint: 'Orçamentos e emissão' },
+  { id: 'bi', label: 'BI', hint: 'Métricas de vendas e conversão' },
 ];
 
 function fmtTime(iso: string | null): string {
@@ -432,6 +439,52 @@ export default function CrmPage() {
       blingEmitted: orders.filter((c) => c.quote?.blingNumber).length,
     };
   }, [orders]);
+
+  const bi = useMemo(() => {
+    const sources: Array<{ source: string; label: string; count: number }> = [];
+    for (const src of LEAD_SOURCES) {
+      const count = conversations.filter((c) => c.leadSource === src).length;
+      sources.push({ source: src, label: LEAD_SOURCE_LABELS[src], count });
+    }
+    const nullCount = conversations.filter((c) => !c.leadSource).length;
+    sources.push({ source: 'SEM_ORIGEM', label: 'Sem origem', count: nullCount });
+
+    let open = 0;
+    let closed = 0;
+    let lost = 0;
+    let openPix = 0;
+    let closedPix = 0;
+    let lostPix = 0;
+    for (const c of conversations) {
+      if (!c.quote) continue;
+      const pix = c.quote.pixTotalCents ?? 0;
+      if (c.funnelStatus === 'CONCLUIDO') {
+        closed += 1;
+        closedPix += pix;
+      } else if (c.funnelStatus === 'CANCELADO') {
+        lost += 1;
+        lostPix += pix;
+      } else {
+        open += 1;
+        openPix += pix;
+      }
+    }
+
+    const conversion = LEAD_SOURCES.map((src) => {
+      const group = conversations.filter((c) => c.leadSource === src);
+      const converted = group.filter((c) => c.funnelStatus === 'CONCLUIDO' || c.quote).length;
+      const total = group.length;
+      return {
+        source: src,
+        label: LEAD_SOURCE_LABELS[src],
+        total,
+        converted,
+        rate: total > 0 ? converted / total : 0,
+      };
+    }).filter((r) => r.total > 0);
+
+    return { sources, open, closed, lost, openPix, closedPix, lostPix, conversion };
+  }, [conversations]);
 
   return (
     <div className="flex min-h-0 flex-col gap-3 p-4 lg:h-[calc(100vh-120px)] lg:p-5">
@@ -923,6 +976,8 @@ export default function CrmPage() {
             )}
           </div>
         </div>
+      ) : module === 'bi' ? (
+        <BiSection conversations={conversations} />
       ) : (
         <OrdersTable
           orders={orders}
@@ -1044,6 +1099,19 @@ function Kanban({
                         {DEPARTMENT_LABELS[c.department as Department] ?? c.department}
                       </span>
                     )}
+                    {c.leadSource && (
+                      <span
+                        className={`chip ${
+                          c.leadSource === 'INSTAGRAM'
+                            ? 'bg-pink-500/10 text-pink-300 ring-pink-500/25'
+                            : c.leadSource === 'BUILDER'
+                              ? 'bg-brand/10 text-brand ring-brand/25'
+                              : 'text-zinc-400'
+                        }`}
+                      >
+                        {LEAD_SOURCE_LABELS[c.leadSource as LeadSource] ?? c.leadSource}
+                      </span>
+                    )}
                     {c.unreadCount > 0 && (
                       <span className="tabular rounded-full bg-red-500 px-1.5 py-px font-bold text-white">
                         {c.unreadCount}
@@ -1158,6 +1226,7 @@ function OrdersTable({
             <tr>
               <th className="table-head">Código</th>
               <th className="table-head">Cliente</th>
+              <th className="table-head">Origem</th>
               <th className="table-head">Atualizado</th>
               <th className="table-head text-right">Itens</th>
               <th className="table-head text-right">Total PIX</th>
@@ -1170,7 +1239,7 @@ function OrdersTable({
           <tbody>
             {orders.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-3 py-10 text-center text-zinc-500">
+                <td colSpan={10} className="px-3 py-10 text-center text-zinc-500">
                   Nenhum pedido vinculado ainda. Os orçamentos confirmados pelo WhatsApp aparecem aqui.
                 </td>
               </tr>
@@ -1186,6 +1255,19 @@ function OrdersTable({
                   <td className="px-3 py-2">
                     <span className="font-medium text-zinc-100">{c.customerName || c.whatsappId}</span>
                     <span className="block text-[10px] text-zinc-500">{c.whatsappId}</span>
+                  </td>
+                  <td className="px-3 py-2">
+                    {q.utmSource ? (
+                      <span className="inline-flex items-center rounded-md bg-brand/10 px-1.5 py-0.5 font-mono text-[10px] text-brand ring-1 ring-inset ring-brand/25">
+                        {q.utmSource}
+                      </span>
+                    ) : c.leadSource ? (
+                      <span className="inline-flex items-center rounded-md bg-night-800 px-1.5 py-0.5 text-[10px] text-zinc-400 ring-1 ring-inset ring-night-600">
+                        {LEAD_SOURCE_LABELS[c.leadSource as LeadSource] ?? c.leadSource}
+                      </span>
+                    ) : (
+                      <span className="text-zinc-600">—</span>
+                    )}
                   </td>
                   <td className="tabular px-3 py-2 text-zinc-400">{fmtDate(c.lastMessageAt)}</td>
                   <td className="tabular px-3 py-2 text-right text-zinc-300">{q.items.length}</td>
@@ -1240,6 +1322,157 @@ function StatCard({ label, value }: { label: string; value: string }) {
     <div className="surface">
       <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">{label}</p>
       <p className="tabular mt-0.5 text-xl font-bold tracking-tight text-zinc-50">{value}</p>
+    </div>
+  );
+}
+
+function BiSection({ conversations }: { conversations: Conversation[] }) {
+  const bi = useMemo(() => {
+    const sources: Array<{ source: string; label: string; count: number }> = [];
+    for (const src of LEAD_SOURCES) {
+      const count = conversations.filter((c) => c.leadSource === src).length;
+      sources.push({ source: src, label: LEAD_SOURCE_LABELS[src], count });
+    }
+    const nullCount = conversations.filter((c) => !c.leadSource).length;
+    sources.push({ source: 'SEM_ORIGEM', label: 'Sem origem', count: nullCount });
+    const totalLeads = conversations.length;
+
+    let open = 0;
+    let closed = 0;
+    let lost = 0;
+    let openPix = 0;
+    let closedPix = 0;
+    let lostPix = 0;
+    for (const c of conversations) {
+      if (!c.quote) continue;
+      const pix = c.quote.pixTotalCents ?? 0;
+      if (c.funnelStatus === 'CONCLUIDO') {
+        closed += 1;
+        closedPix += pix;
+      } else if (c.funnelStatus === 'CANCELADO') {
+        lost += 1;
+        lostPix += pix;
+      } else {
+        open += 1;
+        openPix += pix;
+      }
+    }
+
+    const conversion = LEAD_SOURCES.map((src) => {
+      const group = conversations.filter((c) => c.leadSource === src);
+      const converted = group.filter((c) => c.funnelStatus === 'CONCLUIDO' || c.quote).length;
+      const total = group.length;
+      return {
+        source: src,
+        label: LEAD_SOURCE_LABELS[src],
+        total,
+        converted,
+        rate: total > 0 ? converted / total : 0,
+      };
+    }).filter((r) => r.total > 0);
+
+    return { sources, totalLeads, open, closed, lost, openPix, closedPix, lostPix, conversion };
+  }, [conversations]);
+
+  const bar = (count: number, total: number) =>
+    total > 0 ? `${Math.round((count / total) * 100)}%` : '0%';
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+      <div className="grid gap-3 sm:grid-cols-4">
+        <StatCard label="Total de leads" value={String(bi.totalLeads)} />
+        <StatCard label="Orçamentos abertos" value={String(bi.open)} />
+        <StatCard label="Concluídos" value={String(bi.closed)} />
+        <StatCard label="Perdidos" value={String(bi.lost)} />
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        <div className="surface">
+          <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+            Distribuição de leads por origem
+          </h3>
+          <div className="mt-3 space-y-2.5">
+            {bi.sources.map((s) => {
+              const pct = bi.totalLeads > 0 ? (s.count / bi.totalLeads) * 100 : 0;
+              return (
+                <div key={s.source} className="flex items-center gap-2">
+                  <span className="w-32 shrink-0 truncate text-[11px] text-zinc-300">{s.label}</span>
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-night-700/60">
+                    <div
+                      className={`h-full rounded-full ${s.source === 'INSTAGRAM' ? 'bg-pink-500' : s.source === 'BUILDER' ? 'bg-brand' : s.source === 'WHATSAPP_DIRECT' ? 'bg-emerald-500' : 'bg-zinc-500'}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className="tabular w-16 shrink-0 text-right text-[11px] text-zinc-400">
+                    {s.count} <span className="text-zinc-600">({bar(s.count, bi.totalLeads)})</span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="surface">
+          <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+            Volume em orçamentos (abertos vs. fechados)
+          </h3>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            {[
+              { label: 'Abertos', count: bi.open, pix: bi.openPix, cls: 'text-amber-300' },
+              { label: 'Concluídos', count: bi.closed, pix: bi.closedPix, cls: 'text-emerald-300' },
+              { label: 'Perdidos', count: bi.lost, pix: bi.lostPix, cls: 'text-red-300' },
+            ].map((row) => (
+              <div key={row.label} className="rounded-lg border border-night-700/60 bg-night-800/40 p-2.5">
+                <p className="text-[9px] font-semibold uppercase tracking-widest text-zinc-500">{row.label}</p>
+                <p className={`tabular mt-0.5 text-lg font-bold ${row.cls}`}>{row.count}</p>
+                <p className="tabular text-[10px] text-zinc-400">{formatBRL(row.pix)}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="surface">
+        <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+          Taxa de conversão por canal de entrada
+        </h3>
+        {bi.conversion.length === 0 ? (
+          <p className="mt-2 text-xs text-zinc-500">Sem leads registrados ainda.</p>
+        ) : (
+          <table className="mt-2 w-full border-collapse text-xs">
+            <thead>
+              <tr>
+                <th className="table-head">Canal</th>
+                <th className="table-head text-right">Leads</th>
+                <th className="table-head text-right">Convertidos</th>
+                <th className="table-head">Taxa</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bi.conversion.map((row) => (
+                <tr key={row.source} className="border-b border-night-800/70">
+                  <td className="px-3 py-2 text-zinc-300">{row.label}</td>
+                  <td className="tabular px-3 py-2 text-right text-zinc-400">{row.total}</td>
+                  <td className="tabular px-3 py-2 text-right text-zinc-300">{row.converted}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <div className="h-1.5 w-24 overflow-hidden rounded-full bg-night-700/60">
+                        <div
+                          className="h-full rounded-full bg-emerald-500"
+                          style={{ width: `${Math.round(row.rate * 100)}%` }}
+                        />
+                      </div>
+                      <span className="tabular text-[11px] font-semibold text-zinc-300">
+                        {Math.round(row.rate * 100)}%
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }

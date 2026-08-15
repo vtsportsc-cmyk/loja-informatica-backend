@@ -34,6 +34,7 @@ enum LeadSource {
   WHATSAPP_DIRECT
   INDICACAO
   BALCAO
+  INSTAGRAM
 }
 
 enum LostReason {
@@ -88,6 +89,11 @@ model Conversation {
   funnelStatus    FunnelStatus @default(NOVO)
   department      Department?
   leadSource      LeadSource?
+  // Atribuicao de trafego (DataCrazy/UTMs): origem, meio e campanha da URL
+  // (ex.: utm_source=instagram_comment) que gerou o contato/lead.
+  utmSource       String?
+  utmMedium       String?
+  utmCampaign     String?
   lostReason      LostReason?
   lostAt          DateTime?
   lastFollowUpAt  DateTime?
@@ -170,6 +176,10 @@ model Quote {
   installments         Int          @default(1)
   installmentValueCents Int         @default(0)
   parceledTotalCents   Int
+  // Atribuicao de trafego capturada no "Monte seu PC" (?utm_source=...&utm_campaign=...).
+  utmSource            String?
+  utmMedium            String?
+  utmCampaign          String?
   blingOrderId         String?
   blingNumber          String?
   blingStatus          String?

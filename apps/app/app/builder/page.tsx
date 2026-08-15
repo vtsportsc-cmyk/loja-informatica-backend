@@ -52,6 +52,15 @@ export default function BuilderPage() {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ quote: { code: string; pixTotalCents: number }; waLink: string } | null>(null);
+  const [utm, setUtm] = useState<{ source: string; medium: string; campaign: string } | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const source = params.get('utm_source') ?? '';
+    const medium = params.get('utm_medium') ?? '';
+    const campaign = params.get('utm_campaign') ?? '';
+    if (source || medium || campaign) setUtm({ source, medium, campaign });
+  }, []);
 
   useEffect(() => {
     fetch('/api/products')
@@ -113,7 +122,14 @@ export default function BuilderPage() {
       const res = await fetch('/api/quotes', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ customerName, customerPhone, items }),
+        body: JSON.stringify({
+          customerName,
+          customerPhone,
+          items,
+          utmSource: utm?.source ?? null,
+          utmMedium: utm?.medium ?? null,
+          utmCampaign: utm?.campaign ?? null,
+        }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? 'falha ao gerar orçamento');
@@ -293,6 +309,14 @@ export default function BuilderPage() {
               <p className="mt-2 text-center text-xs text-zinc-500">
                 Link do orçamento: <span className="font-mono">/quote/{result.quote.code}</span>
               </p>
+              {utm && (utm.source || utm.medium || utm.campaign) && (
+                <p className="mt-1 text-center text-[10px] text-zinc-600">
+                  Origem:{' '}
+                  <span className="font-mono text-zinc-500">
+                    {utm.source || '—'}{utm.medium ? ` / ${utm.medium}` : ''}{utm.campaign ? ` / ${utm.campaign}` : ''}
+                  </span>
+                </p>
+              )}
             </div>
           )}
         </aside>

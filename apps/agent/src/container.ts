@@ -39,6 +39,7 @@ import {
   type IMessageRepository,
 } from './prisma/MessageRepository.js';
 import { EvolutionWebhookHandler } from './webhooks/evolution.js';
+import { InstagramWebhookHandler } from './webhooks/instagram.js';
 import { PanelApi } from './panel/PanelApi.js';
 import { TranscriptionClient } from './integration/audio/TranscriptionClient.js';
 import { CrmClient } from './integrations/crm/CrmClient.js';
@@ -70,6 +71,10 @@ export interface AppContainer {
   repository: IMessageRepository;
   transcription: TranscriptionClient;
   evolutionWebhook?: EvolutionWebhookHandler;
+  /** Automacao Instagram (comentario -> Direct + lead INSTAGRAM no Kanban). */
+  instagramWebhook?: InstagramWebhookHandler;
+  /** Token de verificacao do webhook do Meta Graph API (hub.verify_token). */
+  instagramVerifyToken: string;
   panelApi?: PanelApi;
   /** Cliente Redis das sessoes/cache (quando habilitado); undefined = memoria. */
   redis?: RedisLike & { ping(): Promise<unknown> };
@@ -245,6 +250,20 @@ export function buildContainer(options: BuildContainerOptions = {}): AppContaine
     transcription,
   });
 
+  const instagramWebhook =
+    env.instagram.enabled && env.instagram.instance
+      ? new InstagramWebhookHandler({
+          repository,
+          evolution: new EvolutionApi({
+            baseURL: env.evolution.baseURL,
+            instance: env.instagram.instance,
+            apiKey: env.evolution.apiKey,
+          }),
+          builderUrl: `${env.instagram.appUrl}/builder`,
+          webhookSecret: env.instagram.webhookSecret || undefined,
+        })
+      : undefined;
+
   const panelApi = new PanelApi({
     repository,
     evolution,
@@ -272,6 +291,8 @@ export function buildContainer(options: BuildContainerOptions = {}): AppContaine
     repository,
     transcription,
     evolutionWebhook,
+    instagramWebhook,
+    instagramVerifyToken: env.instagram.verifyToken,
     panelApi,
     redis: options.redisClient as (RedisLike & { ping(): Promise<unknown> }) | undefined,
   };

@@ -58,8 +58,8 @@ export function isFunnelStatus(value: string): value is FunnelStatus {
   return (FUNNEL_STATUSES as readonly string[]).includes(value);
 }
 
-/** Origens do lead do CRM (Monte seu PC / WhatsApp / indicação / balcão). */
-export const LEAD_SOURCES = ['BUILDER', 'WHATSAPP_DIRECT', 'INDICACAO', 'BALCAO'] as const;
+/** Origens do lead do CRM (Monte seu PC / WhatsApp / indicação / balcão / Instagram). */
+export const LEAD_SOURCES = ['BUILDER', 'WHATSAPP_DIRECT', 'INDICACAO', 'BALCAO', 'INSTAGRAM'] as const;
 
 export type LeadSource = (typeof LEAD_SOURCES)[number];
 
@@ -68,6 +68,7 @@ export const LEAD_SOURCE_LABELS: Record<LeadSource, string> = {
   WHATSAPP_DIRECT: 'WhatsApp direto',
   INDICACAO: 'Indicação',
   BALCAO: 'Balcão',
+  INSTAGRAM: 'Instagram',
 };
 
 export function isLeadSource(value: string): value is LeadSource {

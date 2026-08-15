@@ -50,6 +50,23 @@ export const envSchema = z.object({
   // Segredo compartilhado para validar o header x-signature dos webhooks.
   EVOLUTION_WEBHOOK_SECRET: z.string().default(''),
 
+  // --- Automacao do Instagram (comentarios -> Direct) ---
+  // Habilita o webhook /api/webhooks/instagram: comentario com palavra-chave
+  // (PC/MONTAR/QUERO) recebe resposta no Direct com o link do "Monte seu PC"
+  // (utm_source=instagram_comment) e vira lead INSTAGRAM no Kanban do CRM.
+  INSTAGRAM_AUTOMATION_ENABLED: z
+    .string()
+    .default('false')
+    .transform((v) => ['true', '1', 'yes'].includes(v.trim().toLowerCase())),
+  // Instancia do Instagram criada na Evolution API (integration INSTAGRAM).
+  EVOLUTION_INSTAGRAM_INSTANCE: z.string().default(''),
+  // Segredo para validar x-hub-signature-256 (Meta Graph API) / x-signature (Evolution).
+  INSTAGRAM_WEBHOOK_SECRET: z.string().default(''),
+  // Token de verificacao do webhook do Meta Graph API (hub.verify_token).
+  INSTAGRAM_WEBHOOK_TOKEN: z.string().default('loja_verify_token'),
+  // URL publica do apps/app (usada no link do "Monte seu PC" dos DMs).
+  APP_PUBLIC_URL: z.string().url().default('http://localhost:3001'),
+
   // --- Banco (PostgreSQL via Prisma) ---
   // Vazio = modo sem banco (InMemoryMessageRepository) para dev/demo.
   DATABASE_URL: z.string().default(''),
