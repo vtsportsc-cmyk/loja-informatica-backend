@@ -12,6 +12,7 @@
   },
   "scripts": {
     "build": "npm run generate -w @loja/db && npm run build -w @loja/catalog && npm run build -w @loja/db && npm run build -w @loja/agent",
+    "vercel:build": "npm run generate -w @loja/db && npm run build -w @loja/catalog && npm run build -w @loja/db && npm run build -w @loja/app",
     "typecheck": "npm run typecheck -w @loja/catalog && npm run typecheck -w @loja/db && npm run typecheck -w @loja/agent && npm run typecheck -w @loja/app",
     "test": "npm run test -w @loja/agent",
     "dev:agent": "npm run dev -w @loja/agent",

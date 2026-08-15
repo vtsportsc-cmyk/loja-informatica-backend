@@ -5,7 +5,7 @@ export interface AgentConfig {
 
 export function agentConfig(): AgentConfig {
   return {
-    baseUrl: (process.env.AGENT_API_URL ?? 'http://localhost:3000').replace(/\/$/, ''),
+    baseUrl: (process.env.AGENT_API_URL ?? 'http://localhost:3000').trim().replace(/\/$/, ''),
     apiKey: process.env.AGENT_API_KEY ?? 'dev_agent_key',
   };
 }
