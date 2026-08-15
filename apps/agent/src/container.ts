@@ -4,6 +4,9 @@ import { loadEnv } from './config/env.js';
 import { LLMProviderRouter } from './llm/LLMProviderRouter.js';
 import type { ProviderChangeEvent } from './llm/LLMProviderRouter.js';
 import { KnowledgeBase } from './rag/knowledgeBase.js';
+import { InstitutionalAnswerService } from './rag/institutionalAnswers.js';
+import { createInstitutionalCache } from './rag/institutionalCache.js';
+import type { InstitutionalCache } from './rag/institutionalCache.js';
 import { MessageHandler } from './agent/MessageHandler.js';
 import { InMemorySessionStore } from './agent/InMemorySessionStore.js';
 import { RedisSessionStore } from './agent/RedisSessionStore.js';
@@ -59,6 +62,9 @@ export interface AppContainer {
   sessionStore: ISessionStore;
   knowledgeBase: KnowledgeBase;
   metrics: Metrics;
+  /** Servico de respostas institucionais (cache de FAQ, zero tokens de LLM). */
+  answerService: InstitutionalAnswerService;
+  institutionalCache: InstitutionalCache;
   paymentExpiryJob: PaymentExpiryJob;
   quoteFollowUpJob?: QuoteFollowUpJob;
   repository: IMessageRepository;
@@ -74,6 +80,8 @@ export interface BuildContainerOptions {
   stockCatalog?: readonly StockItem[];
   /** Cliente Redis (ioredis/node-redis) para o RedisSessionStore; sem ele cai em memoria. */
   redisClient?: RedisLike;
+  /** Injeta um cache institucional pronto (testes/demos); default: Redis ou memoria. */
+  institutionalCache?: InstitutionalCache;
   /** Cliente Prisma (PostgreSQL) para persistencia de conversas/mensagens. */
   prismaClient?: PrismaClient;
   /** Injeta um repositorio de mensagens para testes/demos. */
@@ -106,6 +114,12 @@ export function buildContainer(options: BuildContainerOptions = {}): AppContaine
   const sessionStore = buildSessionStore(env, options.redisClient);
   const knowledgeBase = new KnowledgeBase();
   const metrics = new Metrics();
+  const institutionalCache =
+    options.institutionalCache ?? createInstitutionalCache(options.redisClient);
+  const answerService = new InstitutionalAnswerService({
+    cache: institutionalCache,
+    ttlSeconds: env.cache.ttlSeconds,
+  });
   const rateLimiter = new SlidingWindowRateLimiter(
     env.rateLimit.maxRequests,
     env.rateLimit.windowMs,
@@ -169,6 +183,7 @@ export function buildContainer(options: BuildContainerOptions = {}): AppContaine
     tools,
     sessionStore,
     knowledgeBase,
+    answerService,
     rateLimiter,
     sessionLock,
     metrics,
@@ -248,6 +263,8 @@ export function buildContainer(options: BuildContainerOptions = {}): AppContaine
     sessionStore,
     knowledgeBase,
     metrics,
+    answerService,
+    institutionalCache,
     paymentExpiryJob,
     quoteFollowUpJob,
     repository,

@@ -67,6 +67,16 @@ export const agentReplySchema = z.object({
   text: z.string().min(1),
   quickReplies: z.array(z.object({ id: z.string(), label: z.string() })).optional(),
   attachmentUrl: z.string().optional(),
+  // Observabilidade: metricas de geracao da resposta pela IA (tokens/latencia).
+  llm: z
+    .object({
+      tokensUsed: z.number().int().nonnegative(),
+      responseTimeMs: z.number().int().nonnegative(),
+      provider: z.string(),
+      model: z.string(),
+      cached: z.boolean(),
+    })
+    .optional(),
 });
 export type AgentReply = z.infer<typeof agentReplySchema>;
 

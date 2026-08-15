@@ -13,6 +13,8 @@ import {
   ToolRegistry,
 } from '../src/agent/ToolRegistry.js';
 import { KnowledgeBase } from '../src/rag/knowledgeBase.js';
+import { InstitutionalAnswerService } from '../src/rag/institutionalAnswers.js';
+import { MemoryInstitutionalCache } from '../src/rag/institutionalCache.js';
 import { Metrics } from '../src/observability/metrics.js';
 import { createPaymentExpiryJob } from '../src/agent/paymentExpiryJob.js';
 import { PaymentClient } from '../src/integration/payment/PaymentClient.js';
@@ -123,6 +125,7 @@ async function startApp(script: ReturnType<typeof fullPurchaseScript> = fullPurc
     sessionStore,
     knowledgeBase,
     metrics,
+    answerService: new InstitutionalAnswerService({ cache: new MemoryInstitutionalCache() }),
     paymentExpiryJob,
     repository,
     evolutionWebhook,

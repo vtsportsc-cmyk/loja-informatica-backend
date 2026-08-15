@@ -24,6 +24,22 @@ export const DEFAULT_FAQS: readonly FaqEntry[] = [
     keywords: ['horario', 'funcionamento', 'aberto', 'abre', 'fecha', 'atendimento'],
   },
   {
+    id: 'endereco-loja',
+    category: 'atendimento',
+    question: 'Qual e o endereco da loja?',
+    answer:
+      'Estamos na Av. Paulista, 1000 - Bela Vista, Sao Paulo - SP. Atendimento presencial de segunda a sexta das 9h as 18h e sabados das 9h as 13h.',
+    keywords: [
+      'endereco',
+      'endereço',
+      'localizacao',
+      'local da loja',
+      'onde fica a loja',
+      'fica a loja',
+      'cep da loja',
+    ],
+  },
+  {
     id: 'atendimento-contato',
     category: 'atendimento',
     question: 'Como falo com um atendente?',
@@ -77,7 +93,19 @@ export const DEFAULT_FAQS: readonly FaqEntry[] = [
     question: 'Quais formas de pagamento sao aceitas?',
     answer:
       'Aceitamos PIX (com desconto), cartao de credito em ate 12x e boleto. No PIX o pagamento e confirmado na hora e a separacao e a emissao da NF sao feitas pelo vendedor.',
-    keywords: ['pagamento', 'pix', 'cartao', 'credito', 'boleto', 'parcelamento', 'parcelar', '12x', 'desconto'],
+    keywords: [
+      'pagamento',
+      'pix',
+      'cartao',
+      'credito',
+      'boleto',
+      'parcelamento',
+      'parcelar',
+      '12x',
+      'desconto',
+      'formas de pagamento',
+      'aceitam pix',
+    ],
   },
 ];
 

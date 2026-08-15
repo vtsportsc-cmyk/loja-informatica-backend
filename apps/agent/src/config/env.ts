@@ -48,6 +48,7 @@ export interface EnvConfig {
   payment: { baseURL: string; apiKey: string; webhookSecret: string; pixMerchant: { name: string; city: string; key: string }; pixExpiresInMinutes: number };
   rateLimit: { maxRequests: number; windowMs: number };
   session: { store: 'memory' | 'redis'; ttlSeconds: number; redisUrl: string };
+  cache: { enabled: boolean; redisUrl: string; ttlSeconds: number };
   crm: { baseURL: string; apiToken: string; enabled: boolean };
   ragIndexPath: string;
   followUp: { inactivityHours: number; intervalMs: number };
@@ -120,6 +121,11 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): EnvConfig {
       store: v.SESSION_STORE,
       ttlSeconds: v.SESSION_TTL_SECONDS,
       redisUrl: v.REDIS_URL,
+    },
+    cache: {
+      enabled: v.REDIS_CACHE_ENABLED,
+      redisUrl: v.REDIS_CACHE_URL || v.REDIS_URL,
+      ttlSeconds: v.INSTITUTIONAL_CACHE_TTL_SECONDS,
     },
     crm: {
       baseURL: v.CRM_API_URL,

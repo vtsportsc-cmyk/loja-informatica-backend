@@ -152,6 +152,8 @@ export class EvolutionWebhookHandler {
         type: 'text',
         text: reply.text,
         status: 'sent',
+        tokensUsed: reply.llm?.tokensUsed ?? 0,
+        responseTimeMs: reply.llm?.responseTimeMs ?? 0,
       });
       await this.repository.touchConversation(conversation.id, {
         at: new Date().toISOString(),

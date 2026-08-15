@@ -148,6 +148,9 @@ model Message {
   agent          Agent?       @relation(fields: [agentId], references: [id])
   whatsappId     String?
   status         String       @default("received")
+  // Observabilidade: consumo de tokens e latencia da resposta gerada pela IA.
+  tokensUsed     Int          @default(0)
+  responseTimeMs Int          @default(0)
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])

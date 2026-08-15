@@ -1,6 +1,7 @@
 import type { Server } from 'node:http';
 import { Redis } from 'ioredis';
 import { RedisSessionStore } from './agent/RedisSessionStore.js';
+import { RedisInstitutionalCache } from './rag/institutionalCache.js';
 import type { RedisLike } from './agent/RedisSessionStore.js';
 import { loadDotEnvFile, loadEnv } from './config/env.js';
 import type { EnvConfig } from './config/env.js';
@@ -24,7 +25,18 @@ const SHUTDOWN_TIMEOUT_MS = 5_000;
 export async function bootstrap(
   env: EnvConfig = loadEnv(),
 ): Promise<{ server: Server; container: AppContainer }> {
-  const redisClient = env.session.store === 'redis' ? await connectRedis(env) : undefined;
+  const needsSessionRedis = env.session.store === 'redis';
+  const needsCacheRedis = env.cache.enabled;
+
+  // 1. Redis das sessoes: obrigatorio quando SESSION_STORE=redis (falha no boot).
+  // 2. Redis do cache institucional: opcional; se nao responder, degrada para
+  //    memoria (o agente continua funcionando, so perde o cache compartilhado).
+  let redisClient: (RedisLike & { quit(): Promise<void> }) | undefined;
+  if (needsSessionRedis) {
+    redisClient = await connectRedis(env.session.redisUrl);
+  } else if (needsCacheRedis) {
+    redisClient = await connectCacheRedis(env.cache.redisUrl);
+  }
 
   const container = buildContainer({
     env,
@@ -41,8 +53,8 @@ export async function bootstrap(
   return { server, container };
 }
 
-export async function connectRedis(env: EnvConfig): Promise<RedisLike & { quit(): Promise<void> }> {
-  const client = new Redis(env.session.redisUrl, {
+export async function connectRedis(url: string): Promise<RedisLike & { quit(): Promise<void> }> {
+  const client = new Redis(url, {
     maxRetriesPerRequest: 2,
     retryStrategy: (times) => Math.min(times * 500, 3_000),
   });
@@ -55,15 +67,35 @@ export async function connectRedis(env: EnvConfig): Promise<RedisLike & { quit()
 
   try {
     // Pre-check: garante que o Redis esta alcancavel antes de expor o servidor.
-    await pingRedis(client, env.session.redisUrl);
+    await pingRedis(client, url);
   } catch (err) {
     await client.quit().catch(() => undefined);
     throw new Error(
-      `[boot] SESSION_STORE=redis mas o Redis em ${env.session.redisUrl} nao respondeu ao ping. ` +
+      `[boot] SESSION_STORE=redis mas o Redis em ${url} nao respondeu ao ping. ` +
         `Cheque o container/servico Redis e o REDIS_URL. (${(err as Error).message})`,
     );
   }
 
+  return wrapRedisClient(client);
+}
+
+/** Conexao do cache institucional: falha SOFT (nunca derruba o boot). */
+async function connectCacheRedis(
+  url: string,
+): Promise<(RedisLike & { quit(): Promise<void> }) | undefined> {
+  try {
+    const client = await connectRedis(url);
+    console.log(`[boot] cache.institutional=redis (${sanitizeUrl(url)})`);
+    return client;
+  } catch (err) {
+    console.warn(
+      `[boot] cache.institutional=memory (fallback): Redis indisponivel em ${url}. ${(err as Error).message}`,
+    );
+    return undefined;
+  }
+}
+
+function wrapRedisClient(client: Redis): RedisLike & { quit(): Promise<void> } {
   return {
     get: (key) => client.get(key),
     set: (key, value, opts) =>
@@ -117,6 +149,11 @@ function logBootSummary(env: EnvConfig, container: AppContainer): void {
   if (container.sessionStore instanceof RedisSessionStore) {
     console.log('[boot] session.store.redis=conectado');
   }
+  const cacheType =
+    container.institutionalCache instanceof RedisInstitutionalCache ? 'redis' : 'memory';
+  console.log(
+    `[boot] cache.institutional=${cacheType} enabled=${env.cache.enabled ? 'sim' : 'nao'} ttl=${env.cache.ttlSeconds}s`,
+  );
 }
 
 function sanitizeUrl(url: string): string {

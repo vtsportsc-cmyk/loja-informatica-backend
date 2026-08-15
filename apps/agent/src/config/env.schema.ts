@@ -83,6 +83,19 @@ export const envSchema = z.object({
   SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(1800),
   REDIS_URL: z.string().default('redis://localhost:6379'),
 
+  // --- Cache de respostas institucionais (Redis) ---
+  // true = conecta no Redis para servir FAQs frequentes (endereco, horario,
+  // pagamento...) SEM consumir tokens da LLM. Se o Redis nao responder, cai em
+  // memoria (graceful degradation) e o agente continua funcionando.
+  REDIS_CACHE_ENABLED: z
+    .string()
+    .default('false')
+    .transform((v) => ['true', '1', 'yes'].includes(v.trim().toLowerCase())),
+  // URL do cache (default: mesma do REDIS_URL das sessoes).
+  REDIS_CACHE_URL: z.string().default(''),
+  // TTL do cache institucional em segundos (default 12h).
+  INSTITUTIONAL_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(43_200),
+
   // --- CRM (Backstage / gestao de oportunidades) ---
   CRM_API_URL: z.string().url().default('http://localhost:4000/api/v1'),
   CRM_API_TOKEN: z.string().default('crm_dev_token'),

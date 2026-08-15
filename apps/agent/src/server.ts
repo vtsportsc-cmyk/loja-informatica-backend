@@ -54,6 +54,7 @@ async function handle(
         size: sessions.length,
         fallbackActive: container.router.state.fallbackActive,
       },
+      institutionalAnswers: container.answerService.stats(),
     });
   }
 

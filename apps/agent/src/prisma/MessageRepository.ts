@@ -65,6 +65,10 @@ export interface MessageRecord {
   type: string;
   text: string | null;
   agentId: string | null;
+  /** Tokens consumidos pela IA para gerar esta mensagem (outbound). */
+  tokensUsed: number;
+  /** Tempo total (ms) de geracao da resposta pela IA (outbound). */
+  responseTimeMs: number;
   createdAt: string;
 }
 
@@ -77,6 +81,10 @@ export interface MessageInput {
   whatsappId?: string | null;
   agentId?: string | null;
   status?: string;
+  /** Metrica: tokens consumidos pela IA (respostas outbound). */
+  tokensUsed?: number;
+  /** Metrica: tempo de geracao da resposta pela IA em ms (respostas outbound). */
+  responseTimeMs?: number;
 }
 
 export interface QuoteItemRecord {
@@ -227,6 +235,8 @@ export class PrismaMessageRepository implements IMessageRepository {
       type: m.type,
       text: m.text,
       agentId: m.agentId,
+      tokensUsed: m.tokensUsed,
+      responseTimeMs: m.responseTimeMs,
       createdAt: m.createdAt.toISOString(),
     }));
   }
@@ -257,6 +267,8 @@ export class PrismaMessageRepository implements IMessageRepository {
         mediaMimeType: input.mediaMimeType ?? null,
         whatsappId: input.whatsappId ?? null,
         status: 'received',
+        tokensUsed: 0,
+        responseTimeMs: 0,
       },
     });
   }
@@ -274,6 +286,8 @@ export class PrismaMessageRepository implements IMessageRepository {
         agentId: input.agentId ?? null,
         whatsappId: input.whatsappId ?? null,
         status: input.status ?? 'sent',
+        tokensUsed: input.tokensUsed ?? 0,
+        responseTimeMs: input.responseTimeMs ?? 0,
       },
     });
   }
@@ -733,6 +747,8 @@ export class InMemoryMessageRepository implements IMessageRepository {
         type: m.input.type,
         text: m.input.text ?? null,
         agentId: m.input.agentId ?? null,
+        tokensUsed: m.input.tokensUsed ?? 0,
+        responseTimeMs: m.input.responseTimeMs ?? 0,
         createdAt: m.at,
       }));
   }

@@ -1,5 +1,6 @@
 import { KnowledgeBase } from '../rag/knowledgeBase.js';
 import { FaqService } from '../rag/faq.js';
+import { InstitutionalAnswerService } from '../rag/institutionalAnswers.js';
 import { LLMProviderRouter } from '../llm/LLMProviderRouter.js';
 import type { LlmChatMessage, LlmToolCall } from '../llm/types.js';
 import { BotStateMachine } from '../fsm/BotStateMachine.js';
@@ -20,6 +21,13 @@ import { Metrics } from '../observability/metrics.js';
 const MAX_TOOL_ROUNDS = 4;
 const MAX_HISTORY_MESSAGES = 10;
 
+// Diretrizes rigidas (Prompt Context Guard): regras nao negociáveis do agente.
+// Mantidas fora do RAG para nunca serem diluidas pelo contexto injetado.
+export const PROMPT_GUARD_RULES = `Diretrizes RIGIDAS do atendimento (nao negociáveis):
+- NUNCA altere, invente ou informe precos de hardware que nao constem EXATAMENTE na base tecnica/FAQ desta mensagem. Se nao houver preco na base, diga que vai confirmar com o vendedor em vez de chutar.
+- Respeite estritamente as regras de compatibilidade do "Monte seu PC": so recomende combinacoes de pecas validadas pela ferramenta check_hardware_compatibility; JAMAIS sugira uma montagem incompativel mesmo que o cliente insista.
+- Em caso de duvida sobre PRAZOS (entrega, servico, emissao de NF) ou sobre GARANTIA, NÃO invente respostas: oriente o cliente a falar com um atendente humano (handoff).`;
+
 export interface MessageHandlerOptions {
   router: LLMProviderRouter;
   tools: AgentToolExecutor;
@@ -27,6 +35,8 @@ export interface MessageHandlerOptions {
   knowledgeBase?: KnowledgeBase;
   /** Base de FAQs/politicas da loja injetada no contexto do LLM. */
   faqService?: FaqService;
+  /** Respostas institucionais frequentes servidas direto do cache (zero tokens). */
+  answerService?: InstitutionalAnswerService;
   /** Hook apos transicoes de FSM (ex.: gerar cobranca ao entrar em PAYMENT_PENDING). */
   onTransition?: (state: SessionState, fsm: BotStateMachine) => Promise<void> | void;
   /** Cliente CRM para eventos de ciclo de vida (lead.created); opcional. */
@@ -35,6 +45,7 @@ export interface MessageHandlerOptions {
   rateLimiter?: RateLimiter;
   sessionLock?: SessionLock;
   metrics?: Metrics;
+  logger?: (message: string) => void;
 }
 
 export class MessageHandler {
@@ -43,12 +54,14 @@ export class MessageHandler {
   private readonly sessionStore: SessionStore;
   private readonly knowledgeBase: KnowledgeBase;
   private readonly faqService: FaqService;
+  private readonly answerService?: InstitutionalAnswerService;
   private readonly onTransition?: MessageHandlerOptions['onTransition'];
   private readonly crmClient?: ICrmClient;
   private readonly maxToolRounds: number;
   private readonly rateLimiter: RateLimiter;
   private readonly sessionLock: SessionLock;
   private readonly metrics: Metrics;
+  private readonly logger: (message: string) => void;
 
   constructor(options: MessageHandlerOptions) {
     this.router = options.router;
@@ -56,12 +69,14 @@ export class MessageHandler {
     this.sessionStore = options.sessionStore ?? new InMemorySessionStore();
     this.knowledgeBase = options.knowledgeBase ?? new KnowledgeBase();
     this.faqService = options.faqService ?? new FaqService();
+    this.answerService = options.answerService;
     this.onTransition = options.onTransition;
     this.crmClient = options.crmClient;
     this.maxToolRounds = options.maxToolRounds ?? MAX_TOOL_ROUNDS;
     this.rateLimiter = options.rateLimiter ?? allowAllRateLimiter;
     this.sessionLock = options.sessionLock ?? new SessionLock();
     this.metrics = options.metrics ?? new Metrics();
+    this.logger = options.logger ?? ((m) => console.log(`[agent] ${m}`));
   }
 
   async processInbound(inbound: AgentInbound): Promise<AgentBotResponse> {
@@ -104,47 +119,70 @@ export class MessageHandler {
     });
     session.botState = fsm.current;
 
-    const messages = this.buildMessages(session, inbound);
+    // Observabilidade: consumo de tokens e tempo de geracao da resposta.
+    const generationStarted = performance.now();
+    let tokensUsed = 0;
+    let provider = 'none';
+    let model = '';
+    let cached = false;
 
     let replyText: string | null = null;
-    let rounds = 0;
 
-    while (rounds < this.maxToolRounds) {
-      const llmResult = await this.router.chat({
-        messages,
-        tools: this.tools.definitions,
-        toolChoice: 'auto',
-        temperature: 0.4,
-      });
-      rounds += 1;
+    const cachedAnswer = await this.answerService?.tryAnswer(inbound.message.text ?? '');
+    if (cachedAnswer) {
+      replyText = cachedAnswer.text;
+      provider = 'institutional';
+      model = cachedAnswer.faqId;
+      cached = true;
+      this.metrics.recordInstitutionalAnswer(cachedAnswer.cached);
+      this.logger(`[${inbound.ticketId}] resposta institucional via cache (${cachedAnswer.faqId}, cached=${cachedAnswer.cached}).`);
+    } else {
+      const messages = this.buildMessages(session, inbound);
+      let rounds = 0;
 
-      if (llmResult.toolCalls.length === 0) {
-        replyText = llmResult.content;
-        break;
+      while (rounds < this.maxToolRounds) {
+        const llmResult = await this.router.chat({
+          messages,
+          tools: this.tools.definitions,
+          toolChoice: 'auto',
+          temperature: 0.4,
+        });
+        rounds += 1;
+        tokensUsed +=
+          (llmResult.usage?.promptTokens ?? 0) + (llmResult.usage?.completionTokens ?? 0);
+        provider = llmResult.provider;
+        model = llmResult.model;
+
+        if (llmResult.toolCalls.length === 0) {
+          replyText = llmResult.content;
+          break;
+        }
+
+        const assistantMessage: LlmChatMessage = {
+          role: 'assistant',
+          content: llmResult.content ?? '',
+          name: 'assistant',
+        };
+        messages.push({ ...assistantMessage });
+
+        for (const rawCall of llmResult.toolCalls) {
+          const call = this.enrichToolCall(session, rawCall);
+          const toolResult = await this.tools.execute(call);
+          this.applyToolEffect(session, fsm, call.name, call.arguments, toolResult);
+          messages.push({ role: 'tool', content: toolResult, toolCallId: call.id, name: call.name });
+        }
       }
 
-      const assistantMessage: LlmChatMessage = {
-        role: 'assistant',
-        content: llmResult.content ?? '',
-        name: 'assistant',
-      };
-      messages.push({ ...assistantMessage });
-
-      for (const rawCall of llmResult.toolCalls) {
-        const call = this.enrichToolCall(session, rawCall);
-        const toolResult = await this.tools.execute(call);
-        this.applyToolEffect(session, fsm, call.name, call.arguments, toolResult);
-        messages.push({ role: 'tool', content: toolResult, toolCallId: call.id, name: call.name });
+      if (replyText === null) {
+        replyText =
+          rounds >= this.maxToolRounds
+            ? 'Estou com dificuldade para concluir a analise. Um vendedor vai te ajudar em instantes.'
+            : 'Pode me dar mais detalhes do que voce procura?';
+        fsm.transition({ type: 'HANDOFF', reason: 'max_tool_rounds' });
       }
     }
 
-    if (replyText === null) {
-      replyText =
-        rounds >= this.maxToolRounds
-          ? 'Estou com dificuldade para concluir a analise. Um vendedor vai te ajudar em instantes.'
-          : 'Pode me dar mais detalhes do que voce procura?';
-      fsm.transition({ type: 'HANDOFF', reason: 'max_tool_rounds' });
-    }
+    const responseTimeMs = Math.round(performance.now() - generationStarted);
 
     if (this.onTransition) {
       await this.onTransition(session, fsm);
@@ -161,6 +199,13 @@ export class MessageHandler {
         channel: inbound.channel,
         type: 'text',
         text: replyText,
+        llm: {
+          tokensUsed,
+          responseTimeMs,
+          provider,
+          model,
+          cached,
+        },
       },
       ticketUpdate: {
         ticketId: inbound.ticketId,
@@ -241,6 +286,8 @@ Regras:
 - Horario de atendimento, servicos, garantia e precos: responda com base nos FAQs.
 - Ao confirmar um pagamento, informe que a separacao e a emissao da NF serao feitas pelo vendedor.
 - Se o cliente perguntar o status de um pedido, use check_order_status com o ID informado.
+
+${PROMPT_GUARD_RULES}
 
 Contexto da sessao (ticket ${session.ticketId}):
 - Estado atual do atendimento: ${session.botState}

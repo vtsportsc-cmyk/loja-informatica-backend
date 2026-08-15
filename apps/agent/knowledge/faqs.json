@@ -9,6 +9,13 @@
       "keywords": ["horario", "funcionamento", "aberto", "abre", "fecha", "atendimento"]
     },
     {
+      "id": "endereco-loja",
+      "category": "atendimento",
+      "question": "Qual e o endereco da loja?",
+      "answer": "Estamos na Av. Paulista, 1000 - Bela Vista, Sao Paulo - SP. Atendimento presencial de segunda a sexta das 9h as 18h e sabados das 9h as 13h.",
+      "keywords": ["endereco", "endereço", "localizacao", "local da loja", "onde fica a loja", "fica a loja", "cep da loja"]
+    },
+    {
       "id": "atendimento-contato",
       "category": "atendimento",
       "question": "Como falo com um atendente?",

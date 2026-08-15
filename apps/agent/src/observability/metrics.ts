@@ -38,6 +38,8 @@ interface MetricsSnapshot {
   webhooks: Record<string, number>;
   rateLimited: Record<string, number>;
   totalRateLimited: number;
+  /** Respostas institucionais servidas sem LLM (cache de FAQs). */
+  institutionalAnswers: { matched: number; cacheHits: number };
 }
 
 export class Metrics {
@@ -48,6 +50,14 @@ export class Metrics {
   private readonly terminalOutcomes = new Map<string, number>();
   private readonly webhooks = new Map<string, number>();
   private readonly rateLimited = new Map<string, number>();
+  private institutionalMatched = 0;
+  private institutionalCacheHits = 0;
+
+  /** Resposta institucional servida sem chamada de LLM (cache de FAQ). */
+  recordInstitutionalAnswer(cached: boolean): void {
+    this.institutionalMatched += 1;
+    if (cached) this.institutionalCacheHits += 1;
+  }
 
   recordLlmCall(metric: LlmCallMetric): void {
     const key = `${metric.provider}|${metric.model}`;
@@ -114,6 +124,10 @@ export class Metrics {
       webhooks: Object.fromEntries(this.webhooks),
       rateLimited: Object.fromEntries(this.rateLimited),
       totalRateLimited: [...this.rateLimited.values()].reduce((a, b) => a + b, 0),
+      institutionalAnswers: {
+        matched: this.institutionalMatched,
+        cacheHits: this.institutionalCacheHits,
+      },
     };
   }
 
@@ -149,6 +163,9 @@ export class Metrics {
     }
     lines.push('# TYPE rate_limited_total counter');
     lines.push(`rate_limited_total ${s.totalRateLimited}`);
+    lines.push('# HELP institutional_answers_total Respostas institucionais servidas sem LLM (cache de FAQ).', '# TYPE institutional_answers_total counter');
+    lines.push(`institutional_answers_total{result="matched"} ${s.institutionalAnswers.matched}`);
+    lines.push(`institutional_answers_total{result="cache_hit"} ${s.institutionalAnswers.cacheHits}`);
     return lines.join('\n') + '\n';
   }
 }
