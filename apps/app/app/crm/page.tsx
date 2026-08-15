@@ -3,8 +3,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { formatBRL } from '@loja/catalog';
 import { FUNNEL_STATUSES, FUNNEL_STATUS_LABELS, FUNNEL_STATUS_COLORS } from '@/lib/funnel';
+import { DEPARTMENTS, DEPARTMENT_LABELS, DEPARTMENT_COLORS, isDepartment, type Department } from '@/lib/departments';
 
 type ModuleId = 'funil' | 'atendimento' | 'pedidos';
+
+interface Agent {
+  id: string;
+  name: string;
+  role: string | null;
+  email: string | null;
+  active: boolean;
+}
 
 interface QuoteItem {
   sku: string | null;
@@ -31,6 +40,7 @@ interface Conversation {
   whatsappId: string;
   customerName: string | null;
   funnelStatus: string;
+  department: string | null;
   humanMode: boolean;
   assignedAgentId: string | null;
   unreadCount: number;
@@ -78,6 +88,10 @@ export default function CrmPage() {
   const [draft, setDraft] = useState('');
   const [statusDraft, setStatusDraft] = useState<string>('');
   const [search, setSearch] = useState('');
+  const [departmentFilter, setDepartmentFilter] = useState<string>('todos');
+  const [departmentDraft, setDepartmentDraft] = useState<string>('none');
+  const [agentDraft, setAgentDraft] = useState<string>('none');
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -96,9 +110,16 @@ export default function CrmPage() {
     setLoading(false);
   }, []);
 
+  const refreshAgents = useCallback(async () => {
+    const res = await fetch('/api/crm/agents');
+    const body = await res.json();
+    if (res.ok) setAgents(body.agents ?? []);
+  }, []);
+
   useEffect(() => {
     void refreshList();
-  }, [refreshList]);
+    void refreshAgents();
+  }, [refreshList, refreshAgents]);
 
   const openConversation = useCallback(async (id: string) => {
     setSelectedId(id);
@@ -107,6 +128,8 @@ export default function CrmPage() {
     if (res.ok) {
       setDetail(body);
       setStatusDraft(body.conversation.funnelStatus);
+      setDepartmentDraft(body.conversation.department ?? 'none');
+      setAgentDraft(body.conversation.assignedAgentId ?? 'none');
     } else {
       setError(body.error ?? 'falha ao carregar a conversa');
     }
@@ -169,6 +192,28 @@ export default function CrmPage() {
     }
   }
 
+  async function saveDepartment() {
+    if (!selectedId) return;
+    const res = await fetch(
+      `/api/crm/conversations/${encodeURIComponent(selectedId)}/department`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          department: departmentDraft === 'none' ? null : departmentDraft,
+          assignedAgentId: agentDraft === 'none' ? null : agentDraft,
+        }),
+      },
+    );
+    if (res.ok) {
+      await openConversation(selectedId);
+      await refreshList();
+    } else {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error ?? 'falha ao atribuir departamento');
+    }
+  }
+
   async function emitOrder(id: string) {
     const res = await fetch(`/api/crm/conversations/${encodeURIComponent(id)}/status`, {
       method: 'POST',
@@ -187,14 +232,19 @@ export default function CrmPage() {
   const selected = detail?.conversation ?? null;
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return conversations;
-    return conversations.filter(
-      (c) =>
+    return conversations.filter((c) => {
+      const matchesQuery =
+        !q ||
         (c.customerName ?? '').toLowerCase().includes(q) ||
         c.whatsappId.includes(q) ||
-        (c.quote?.code ?? '').toLowerCase().includes(q),
-    );
-  }, [conversations, search]);
+        (c.quote?.code ?? '').toLowerCase().includes(q);
+      const matchesDepartment =
+        departmentFilter === 'todos' ||
+        (c.department ?? '') === departmentFilter ||
+        (departmentFilter === 'sem-departamento' && !c.department);
+      return matchesQuery && matchesDepartment;
+    });
+  }, [conversations, search, departmentFilter]);
 
   const orders = useMemo(() => conversations.filter((c) => c.quote), [conversations]);
   const ordersStats = useMemo(() => {
@@ -268,6 +318,25 @@ export default function CrmPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
+              <div className="mt-1.5 flex items-center gap-1.5">
+                <select
+                  className="select !py-1 !text-[11px]"
+                  value={departmentFilter}
+                  onChange={(e) => setDepartmentFilter(e.target.value)}
+                  title="Filtrar por departamento (fila)"
+                >
+                  <option value="todos">Todos os departamentos</option>
+                  <option value="sem-departamento">Sem departamento</option>
+                  {DEPARTMENTS.map((d) => (
+                    <option key={d} value={d}>
+                      {DEPARTMENT_LABELS[d]}
+                    </option>
+                  ))}
+                </select>
+                <span className="ml-auto shrink-0 text-[10px] text-zinc-500">
+                  {filtered.length}/{conversations.length}
+                </span>
+              </div>
             </div>
             <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
               {filtered.length === 0 && (
@@ -296,6 +365,11 @@ export default function CrmPage() {
                       className={`h-1.5 w-1.5 rounded-full ${FUNNEL_STATUS_COLORS[c.funnelStatus as keyof typeof FUNNEL_STATUS_COLORS] ?? 'bg-zinc-500'}`}
                     />
                     <span className="truncate text-zinc-400">{c.whatsappId}</span>
+                    {c.department && (
+                      <span className="rounded bg-brand/15 px-1 text-brand">
+                        {DEPARTMENT_LABELS[c.department as Department] ?? c.department}
+                      </span>
+                    )}
                     {c.quote && (
                       <span className="ml-auto font-mono text-zinc-500">{c.quote.code}</span>
                     )}
@@ -412,6 +486,58 @@ export default function CrmPage() {
               <p className="p-4 text-xs text-zinc-500">Contexto do cliente aparecerá aqui.</p>
             ) : (
               <div className="space-y-3 p-3">
+                <div>
+                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                    Atribuição
+                  </h3>
+                  <div className="mt-1.5 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <select
+                        className="select !py-1.5 !text-xs"
+                        value={departmentDraft}
+                        onChange={(e) => setDepartmentDraft(e.target.value)}
+                        title="Fila/departamento"
+                      >
+                        <option value="none">Sem departamento</option>
+                        {DEPARTMENTS.map((d) => (
+                          <option key={d} value={d}>
+                            {DEPARTMENT_LABELS[d]}
+                          </option>
+                        ))}
+                      </select>
+                      <span
+                        className={`h-2 w-2 shrink-0 rounded-full ${
+                          departmentDraft !== 'none' && isDepartment(departmentDraft)
+                            ? DEPARTMENT_COLORS[departmentDraft as Department]
+                            : 'bg-zinc-500'
+                        }`}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <select
+                        className="select !py-1.5 !text-xs"
+                        value={agentDraft}
+                        onChange={(e) => setAgentDraft(e.target.value)}
+                        title="Atendente responsável"
+                      >
+                        <option value="none">Nenhum atendente</option>
+                        {agents.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                            {a.role ? ` · ${a.role}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="btn-ghost shrink-0 !px-2 !py-1 !text-[11px]"
+                        onClick={() => void saveDepartment()}
+                      >
+                        Salvar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 <div>
                   <h3 className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
                     Funil

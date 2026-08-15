@@ -1,4 +1,4 @@
-import { FunnelStatus } from '@loja/db';
+import { Department, FunnelStatus } from '@loja/db';
 import type { PrismaClient } from '@loja/db';
 
 // ============================================================================
@@ -14,12 +14,21 @@ export interface ConversationRecord {
   customerId: string;
   customerName: string | null;
   funnelStatus: string;
+  department: string | null;
   humanMode: boolean;
   assignedAgentId: string | null;
   unreadCount: number;
   lastMessageAt: string | null;
   /** Orcamento/pedido vinculado (Monte seu PC), quando houver. */
   quote?: QuoteSummary | null;
+}
+
+export interface AgentRecord {
+  id: string;
+  name: string;
+  role: string | null;
+  email: string | null;
+  active: boolean;
 }
 
 export interface MessageRecord {
@@ -78,6 +87,7 @@ export interface IMessageRepository {
   getConversationByWhatsapp(whatsappId: string): Promise<ConversationRecord | null>;
   listConversations(): Promise<ConversationRecord[]>;
   listMessages(conversationId: string): Promise<MessageRecord[]>;
+  listAgents(): Promise<AgentRecord[]>;
   saveInboundMessage(conversationId: string, input: MessageInput): Promise<void>;
   saveOutboundMessage(conversationId: string, input: MessageInput): Promise<void>;
   touchConversation(conversationId: string, opts: { at?: string; unreadDelta?: number }): Promise<void>;
@@ -85,6 +95,11 @@ export interface IMessageRepository {
   assume(conversationId: string, agentId: string): Promise<void>;
   release(conversationId: string): Promise<void>;
   setFunnelStatus(conversationId: string, status: string): Promise<ConversationRecord>;
+  /** Atribui departamento (fila) e, opcionalmente, um atendente responsavel. */
+  setDepartment(
+    conversationId: string,
+    opts: { department?: string | null; assignedAgentId?: string | null },
+  ): Promise<ConversationRecord>;
   findQuoteByCode(code: string): Promise<QuoteRecord | null>;
   /** Marca a conversa como oportunidade de alto valor e vincula o orcamento. */
   markHighValueOpportunity(
@@ -163,6 +178,20 @@ export class PrismaMessageRepository implements IMessageRepository {
     }));
   }
 
+  async listAgents(): Promise<AgentRecord[]> {
+    const agents = await this.prisma.agent.findMany({
+      where: { active: true },
+      orderBy: { name: 'asc' },
+    });
+    return agents.map((a) => ({
+      id: a.id,
+      name: a.name,
+      role: a.role,
+      email: a.email,
+      active: a.active,
+    }));
+  }
+
   async saveInboundMessage(conversationId: string, input: MessageInput): Promise<void> {
     await this.prisma.message.create({
       data: {
@@ -236,6 +265,25 @@ export class PrismaMessageRepository implements IMessageRepository {
     const conv = await this.prisma.conversation.update({
       where: { id: conversationId },
       data: { funnelStatus: status as FunnelStatus },
+      include: { customer: true, quote: { include: { items: true } } },
+    });
+    return toConversationRecord(conv, conv.customer.name, conv.customer.whatsappId, mapQuoteSummary(conv.quote));
+  }
+
+  async setDepartment(
+    conversationId: string,
+    opts: { department?: string | null; assignedAgentId?: string | null },
+  ): Promise<ConversationRecord> {
+    const data: Record<string, unknown> = {};
+    if (opts.department !== undefined) {
+      data['department'] = opts.department === null ? null : (opts.department as Department);
+    }
+    if (opts.assignedAgentId !== undefined) {
+      data['assignedAgentId'] = opts.assignedAgentId;
+    }
+    const conv = await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data,
       include: { customer: true, quote: { include: { items: true } } },
     });
     return toConversationRecord(conv, conv.customer.name, conv.customer.whatsappId, mapQuoteSummary(conv.quote));
@@ -343,6 +391,8 @@ export class InMemoryMessageRepository implements IMessageRepository {
   private quotes = new Map<string, QuoteRecord>();
   /** Indice de orcamentos por codigo (inclusive os ainda nao vinculados). */
   private quoteIndex = new Map<string, QuoteRecord>();
+  /** Resumo do orcamento exposto ao painel/automacao (chave = conversationId). */
+  private quoteSummaries = new Map<string, QuoteSummary>();
 
   async ensureConversation(whatsappId: string, name?: string | null): Promise<ConversationRecord> {
     const clean = normalizePhone(whatsappId);
@@ -360,6 +410,7 @@ export class InMemoryMessageRepository implements IMessageRepository {
       customerId: `cust-${clean}`,
       customerName: name ?? null,
       funnelStatus: 'NOVO',
+      department: null,
       humanMode: false,
       assignedAgentId: null,
       unreadCount: 0,
@@ -371,18 +422,23 @@ export class InMemoryMessageRepository implements IMessageRepository {
   }
 
   async getConversationById(id: string): Promise<ConversationRecord | null> {
-    return this.conversations.get(id) ?? null;
+    const conv = this.conversations.get(id);
+    if (!conv) return null;
+    return { ...conv, quote: this.quoteSummaries.get(id) ?? null };
   }
 
   async getConversationByWhatsapp(whatsappId: string): Promise<ConversationRecord | null> {
     const id = this.whatsappIndex.get(normalizePhone(whatsappId));
-    return id ? (this.conversations.get(id) ?? null) : null;
+    if (!id) return null;
+    const conv = this.conversations.get(id);
+    if (!conv) return null;
+    return { ...conv, quote: this.quoteSummaries.get(id) ?? null };
   }
 
   async listConversations(): Promise<ConversationRecord[]> {
-    return [...this.conversations.values()].sort((a, b) =>
-      (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''),
-    );
+    return [...this.conversations.values()]
+      .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''))
+      .map((conv) => ({ ...conv, quote: this.quoteSummaries.get(conv.id) ?? null }));
   }
 
   async listMessages(conversationId: string): Promise<MessageRecord[]> {
@@ -396,6 +452,10 @@ export class InMemoryMessageRepository implements IMessageRepository {
         agentId: m.input.agentId ?? null,
         createdAt: m.at,
       }));
+  }
+
+  async listAgents(): Promise<AgentRecord[]> {
+    return DEMO_AGENTS.map((a) => ({ ...a }));
   }
 
   async saveInboundMessage(conversationId: string, input: MessageInput): Promise<void> {
@@ -445,6 +505,17 @@ export class InMemoryMessageRepository implements IMessageRepository {
     return conv;
   }
 
+  async setDepartment(
+    conversationId: string,
+    opts: { department?: string | null; assignedAgentId?: string | null },
+  ): Promise<ConversationRecord> {
+    const conv = this.conversations.get(conversationId);
+    if (!conv) throw new Error(`Conversa nao encontrada: ${conversationId}`);
+    if (opts.department !== undefined) conv.department = opts.department;
+    if (opts.assignedAgentId !== undefined) conv.assignedAgentId = opts.assignedAgentId;
+    return conv;
+  }
+
   async findQuoteByCode(code: string): Promise<QuoteRecord | null> {
     return this.quoteIndex.get(code) ?? null;
   }
@@ -471,9 +542,34 @@ export class InMemoryMessageRepository implements IMessageRepository {
   }
 
   /** Apenas para testes/demos: registra um orcamento no repositorio em memoria. */
-  seedQuote(quote: QuoteRecord, conversationId?: string): void {
+  seedQuote(
+    quote: QuoteRecord,
+    conversationId?: string,
+    summary?: Partial<
+      Pick<QuoteSummary, 'installments' | 'monthlyValueCents' | 'parceledTotalCents' | 'blingOrderId' | 'blingNumber' | 'blingStatus'>
+    >,
+  ): void {
     this.quoteIndex.set(quote.code, quote);
-    if (conversationId) this.quotes.set(conversationId, quote);
+    if (conversationId) {
+      this.quotes.set(conversationId, quote);
+      this.quoteSummaries.set(conversationId, {
+        code: quote.code,
+        totalCents: quote.totalCents,
+        pixTotalCents: quote.pixTotalCents,
+        installments: summary?.installments ?? 1,
+        monthlyValueCents: summary?.monthlyValueCents ?? quote.totalCents,
+        parceledTotalCents: summary?.parceledTotalCents ?? quote.totalCents,
+        blingOrderId: summary?.blingOrderId ?? null,
+        blingNumber: summary?.blingNumber ?? null,
+        blingStatus: summary?.blingStatus ?? null,
+        items: quote.items.map((item) => ({
+          sku: item.sku,
+          name: item.name,
+          unitPriceCents: item.unitPriceCents,
+          quantity: item.quantity,
+        })),
+      });
+    }
   }
 
   async getQuoteForConversation(conversationId: string): Promise<QuoteRecord | null> {
@@ -497,6 +593,7 @@ function toConversationRecord(
     id: string;
     customerId: string;
     funnelStatus: FunnelStatus;
+    department: Department | null;
     humanMode: boolean;
     assignedAgentId: string | null;
     unreadCount: number;
@@ -513,6 +610,7 @@ function toConversationRecord(
     customerId: conv.customerId,
     customerName,
     funnelStatus: conv.funnelStatus,
+    department: conv.department,
     humanMode: conv.humanMode,
     assignedAgentId: conv.assignedAgentId,
     unreadCount: conv.unreadCount,
@@ -559,6 +657,13 @@ const EARLY_FUNNEL_STATUSES = new Set<string>([
   'MONTANDO_PC',
   'EM_QUALIFICACAO',
 ]);
+
+/** Atendentes demo para o repo em memoria (espelha o seed do packages/db). */
+const DEMO_AGENTS: AgentRecord[] = [
+  { id: 'agent-ana', name: 'Ana Vendedora', role: 'Vendedora', email: 'ana@loja.com', active: true },
+  { id: 'agent-bruno', name: 'Bruno Tech', role: 'Montagem/Orçamentos', email: 'bruno@loja.com', active: true },
+  { id: 'agent-carla', name: 'Carla Admin', role: 'Financeiro/NF', email: 'carla@loja.com', active: true },
+];
 
 function normalizePhone(phone: string): string {
   return phone.replace(/@s\.whatsapp\.net$/i, '').replace(/[^\d]/g, '');

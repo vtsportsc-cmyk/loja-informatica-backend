@@ -71,6 +71,27 @@ export class EvolutionApi {
     await this.sendText(parsed.ticketId, parsed.text);
   }
 
+  /**
+   * Baixa a midia de uma mensagem recebida como base64 (usado para transcrever
+   * audio). Endpoint: POST /chat/getBase64FromMediaMessage/{instance} com o
+   * `key.id` da mensagem (ver doc Evolution API v2). Retorna o base64 puro.
+   */
+  async getBase64FromMediaMessage(messageId: string): Promise<string> {
+    if (!messageId) throw new Error('messageId ausente para baixar midia');
+    const res = await this.request(`/chat/getBase64FromMediaMessage/${encodeURIComponent(this.instance)}`, {
+      message: { key: { id: messageId } },
+      convertToMp4: false,
+    });
+    if (!res.ok) {
+      throw new Error(`Evolution getBase64FromMediaMessage HTTP ${res.status}: ${await res.text().catch(() => '')}`);
+    }
+    const body = (await res.json().catch(() => ({}))) as { base64?: unknown };
+    if (typeof body.base64 !== 'string' || body.base64.length === 0) {
+      throw new Error('Evolution retornou base64 vazio para a midia');
+    }
+    return body.base64;
+  }
+
   private async request(path: string, body: unknown): Promise<Response> {
     return this.fetchImpl(`${this.baseURL}${path}`, {
       method: 'POST',

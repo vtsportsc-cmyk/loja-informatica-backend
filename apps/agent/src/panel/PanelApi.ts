@@ -1,7 +1,8 @@
-import { FUNNEL_STATUSES, isFunnelStatus } from '@loja/db';
+import { DEPARTMENTS, FUNNEL_STATUSES, isDepartment, isFunnelStatus } from '@loja/db';
 import type { EvolutionApi } from '../integration/evolution/EvolutionApi.js';
 import type { BlingOrderService } from '../integration/bling/BlingOrderService.js';
 import type { IMessageRepository } from '../prisma/MessageRepository.js';
+import type { FunnelStatusChangeHook } from '../agent/funnelAutomation.js';
 
 // ============================================================================
 // API REST consumida pelo Painel de CRM (apps/app -> apps/agent).
@@ -9,6 +10,8 @@ import type { IMessageRepository } from '../prisma/MessageRepository.js';
 //   POST /api/messages                      -> vendedor envia msg ao cliente
 //   POST /api/conversations/:id/handoff     -> assumir / liberar atendimento
 //   POST /api/conversations/:id/status      -> mover status do funil (e Bling)
+//   POST /api/conversations/:id/department  -> atribuir departamento/atendente
+//   GET  /api/agents                        -> lista de atendentes ativos
 // Todas exigem o header `x-agent-key` (AGENT_API_KEY).
 // ============================================================================
 
@@ -17,6 +20,8 @@ export interface PanelApiDeps {
   evolution: EvolutionApi;
   bling: BlingOrderService;
   apiKey: string;
+  /** Automacao por mudanca de estagio do funil (ALTA_VALOR / AGUARDANDO_NF). */
+  funnelAutomation?: FunnelStatusChangeHook;
   logger?: (message: string) => void;
 }
 
@@ -32,6 +37,7 @@ export class PanelApi {
   private readonly evolution: EvolutionApi;
   private readonly bling: BlingOrderService;
   private readonly apiKey: string;
+  private readonly funnelAutomation?: FunnelStatusChangeHook;
   private readonly logger: (message: string) => void;
 
   constructor(deps: PanelApiDeps) {
@@ -39,6 +45,7 @@ export class PanelApi {
     this.evolution = deps.evolution;
     this.bling = deps.bling;
     this.apiKey = deps.apiKey;
+    this.funnelAutomation = deps.funnelAutomation;
     this.logger = deps.logger ?? ((m) => console.log(`[panel] ${m}`));
   }
 
@@ -115,7 +122,46 @@ export class PanelApi {
     }
 
     const conversation = await this.repository.setFunnelStatus(conversationId, status);
+    void this.funnelAutomation?.(conversationId, status);
     return { ok: true, status: 200, data: { conversationId, funnelStatus: conversation.funnelStatus } };
+  }
+
+  async listAgents(): Promise<PanelApiResult> {
+    const agents = await this.repository.listAgents();
+    return { ok: true, status: 200, data: { agents } };
+  }
+
+  async assignDepartment(conversationId: string, body: unknown): Promise<PanelApiResult> {
+    const { department, assignedAgentId } = body as {
+      department?: string | null;
+      assignedAgentId?: string | null;
+    };
+    if (department !== undefined && department !== null && !isDepartment(department)) {
+      return { ok: false, status: 400, error: `departamento invalido. Esperado: ${DEPARTMENTS.join(', ')}` };
+    }
+
+    const conversation = await this.repository.getConversationById(conversationId);
+    if (!conversation) {
+      return { ok: false, status: 404, error: 'conversa nao encontrada' };
+    }
+
+    if (assignedAgentId !== undefined && assignedAgentId !== null) {
+      const agents = await this.repository.listAgents();
+      if (!agents.some((a) => a.id === assignedAgentId)) {
+        return { ok: false, status: 400, error: 'atendente nao encontrado' };
+      }
+    }
+
+    const updated = await this.repository.setDepartment(conversationId, {
+      department: department === undefined ? undefined : department,
+      assignedAgentId: assignedAgentId === undefined ? undefined : assignedAgentId,
+    });
+    this.logger(`[${conversationId}] departamento=${updated.department ?? 'n/a'} atendente=${updated.assignedAgentId ?? 'n/a'}`);
+    return {
+      ok: true,
+      status: 200,
+      data: { conversationId, department: updated.department, assignedAgentId: updated.assignedAgentId },
+    };
   }
 
   /** Ao virar AGUARDANDO_NF, envia o orcamento ao Bling para NF/expedicao. */

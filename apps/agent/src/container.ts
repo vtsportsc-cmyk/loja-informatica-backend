@@ -37,10 +37,12 @@ import {
 } from './prisma/MessageRepository.js';
 import { EvolutionWebhookHandler } from './webhooks/evolution.js';
 import { PanelApi } from './panel/PanelApi.js';
+import { TranscriptionClient } from './integration/audio/TranscriptionClient.js';
 import { CrmClient } from './integrations/crm/CrmClient.js';
 import type { ICrmClient } from './integrations/crm/CrmClient.js';
 import { CrmFollowUpHandler } from './webhooks/crm.js';
 import { createChargeOnTransition } from './agent/chargeOnTransition.js';
+import { createFunnelAutomation } from './agent/funnelAutomation.js';
 import { Metrics } from './observability/metrics.js';
 import type { StockItem } from './types/index.js';
 
@@ -58,6 +60,7 @@ export interface AppContainer {
   metrics: Metrics;
   paymentExpiryJob: PaymentExpiryJob;
   repository: IMessageRepository;
+  transcription: TranscriptionClient;
   evolutionWebhook?: EvolutionWebhookHandler;
   panelApi?: PanelApi;
 }
@@ -192,11 +195,28 @@ export function buildContainer(options: BuildContainerOptions = {}): AppContaine
 
   const crmFollowUp = new CrmFollowUpHandler({ sessionStore, evolution });
 
+  const funnelAutomation = createFunnelAutomation({
+    repository,
+    evolution,
+  });
+
+  const transcription = new TranscriptionClient({
+    groqApiKey: env.groq.apiKey,
+    groqBaseURL: env.groq.baseURL,
+    groqModel: env.transcription.groqModel,
+    geminiApiKey: env.gemini.apiKey,
+    geminiBaseURL: env.transcription.geminiBaseURL,
+    geminiModel: env.transcription.geminiModel,
+    enabled: env.transcription.enabled,
+  });
+
   const evolutionWebhook = new EvolutionWebhookHandler({
     repository,
     messageHandler: handler,
     evolution,
     webhookSecret: env.evolution.webhookSecret || undefined,
+    funnelAutomation,
+    transcription,
   });
 
   const panelApi = new PanelApi({
@@ -204,6 +224,7 @@ export function buildContainer(options: BuildContainerOptions = {}): AppContaine
     evolution,
     bling: blingService,
     apiKey: env.agentApiKey,
+    funnelAutomation,
   });
 
   return {
@@ -220,6 +241,7 @@ export function buildContainer(options: BuildContainerOptions = {}): AppContaine
     metrics,
     paymentExpiryJob,
     repository,
+    transcription,
     evolutionWebhook,
     panelApi,
   };

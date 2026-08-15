@@ -1,6 +1,8 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { MessageHandler } from '../agent/MessageHandler.js';
+import type { FunnelStatusChangeHook } from '../agent/funnelAutomation.js';
 import type { EvolutionApi } from '../integration/evolution/EvolutionApi.js';
+import type { TranscriptionClient } from '../integration/audio/TranscriptionClient.js';
 import type { AgentInbound } from '../types/agent.js';
 import type { IMessageRepository } from '../prisma/MessageRepository.js';
 
@@ -18,6 +20,10 @@ export interface EvolutionWebhookDeps {
   messageHandler: MessageHandler;
   evolution: EvolutionApi;
   webhookSecret?: string;
+  /** Automacao de funil: disparada quando a conversa sobe para ALTA_VALOR. */
+  funnelAutomation?: FunnelStatusChangeHook;
+  /** Transcricao de audio (Groq Whisper / Gemini Audio); opcional. */
+  transcription?: TranscriptionClient;
   logger?: (message: string) => void;
 }
 
@@ -51,6 +57,8 @@ export class EvolutionWebhookHandler {
   private readonly messageHandler: MessageHandler;
   private readonly evolution: EvolutionApi;
   private readonly webhookSecret?: string;
+  private readonly funnelAutomation?: FunnelStatusChangeHook;
+  private readonly transcription?: TranscriptionClient;
   private readonly logger: (message: string) => void;
 
   constructor(deps: EvolutionWebhookDeps) {
@@ -58,6 +66,8 @@ export class EvolutionWebhookHandler {
     this.messageHandler = deps.messageHandler;
     this.evolution = deps.evolution;
     this.webhookSecret = deps.webhookSecret;
+    this.funnelAutomation = deps.funnelAutomation;
+    this.transcription = deps.transcription;
     this.logger = deps.logger ?? ((m) => console.log(`[evolution] ${m}`));
   }
 
@@ -95,6 +105,14 @@ export class EvolutionWebhookHandler {
       const conversation = await this.repository.ensureConversation(phone, name);
       const parsed = normalizeMessage(payload.data?.message);
 
+      if (parsed.type === 'audio') {
+        const transcript = await this.transcribeAudio(key.id, parsed);
+        if (transcript) {
+          this.logger(`[${phone}] audio transcrito (${transcript.length} chars).`);
+          parsed.text = transcript;
+        }
+      }
+
       await this.repository.saveInboundMessage(conversation.id, {
         type: parsed.type,
         text: parsed.text,
@@ -116,6 +134,7 @@ export class EvolutionWebhookHandler {
             `[${phone}] orcamento ${quoteCode} detectado na mensagem; ` +
               `oportunidade de alto valor${flagged.linked ? ' (vinculado ao pedido)' : ' (sem vinculo)'}.`,
           );
+          void this.funnelAutomation?.(conversation.id, 'ALTA_VALOR');
         }
       }
 
@@ -153,6 +172,31 @@ export class EvolutionWebhookHandler {
     const a = Buffer.from(expected);
     const b = Buffer.from(received);
     return a.length === b.length && timingSafeEqual(a, b);
+  }
+
+  /**
+   * Baixa a midia de audio via Evolution API e transcreve com a LLM
+   * (Groq Whisper primario / Gemini Audio fallback). Falhas de download ou de
+   * transcricao NUNCA derrubam o webhook: retorna null e o fluxo segue com o
+   * texto padrao "[áudio recebido]".
+   */
+  private async transcribeAudio(
+    messageId: string | undefined,
+    parsed: NormalizedMessage,
+  ): Promise<string | null> {
+    if (!this.transcription || !messageId) return null;
+    try {
+      const base64 = await this.evolution.getBase64FromMediaMessage(messageId);
+      const result = await this.transcription.transcribe({
+        base64,
+        mimeType: parsed.mediaMimeType,
+      });
+      const text = result.text.trim();
+      return text.length > 0 ? text : null;
+    } catch (err) {
+      this.logger(`falha ao transcrever audio (${messageId}): ${(err as Error).message}`);
+      return null;
+    }
   }
 }
 

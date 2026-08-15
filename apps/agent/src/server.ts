@@ -13,10 +13,12 @@ import { RedisSessionStore } from './agent/RedisSessionStore.js';
 //   POST /webhooks/payment             -> notificacao de pagamento (PIX / cartao)
 //   POST /webhooks/crm/follow-up       -> reengajamento disparado pelo CRM
 //   POST /api/messages                 -> vendedor envia msg (painel CRM)
+//   GET  /api/agents                   -> lista de atendentes (painel CRM)
 //   GET  /api/conversations            -> lista de conversas do funil (painel)
 //   GET  /api/conversations/:id        -> conversa + historico de mensagens
 //   POST /api/conversations/:id/handoff-> assumir/liberar atendimento (painel)
 //   POST /api/conversations/:id/status -> mover funil (painel; dispara Bling)
+//   POST /api/conversations/:id/department -> atribuir departamento/atendente
 export function createAppServer(
   port = loadEnv().port,
   container: AppContainer = buildContainer(),
@@ -105,6 +107,17 @@ async function handle(
     return panelRequest(req, res, container, async (panel, body) => panel.sendMessage(body));
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/agents') {
+    if (!container.panelApi) {
+      return json(res, 501, { error: 'api do painel nao configurada' });
+    }
+    if (!container.panelApi.checkAuth(req.headers['x-agent-key'] as string | undefined)) {
+      return json(res, 401, { error: 'chave de API invalida' });
+    }
+    const result = await container.panelApi.listAgents();
+    return json(res, result.status ?? 400, result.ok ? result.data ?? {} : { error: result.error });
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/conversations') {
     if (!container.panelApi) {
       return json(res, 501, { error: 'api do painel nao configurada' });
@@ -142,6 +155,13 @@ async function handle(
     const id = statusMatch[1];
     if (!id) return json(res, 400, { error: 'id ausente' });
     return panelRequest(req, res, container, async (panel, body) => panel.setStatus(id, body));
+  }
+
+  const departmentMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/department$/);
+  if (req.method === 'POST' && departmentMatch) {
+    const id = departmentMatch[1];
+    if (!id) return json(res, 400, { error: 'id ausente' });
+    return panelRequest(req, res, container, async (panel, body) => panel.assignDepartment(id, body));
   }
 
   return json(res, 404, { error: 'rota nao encontrada' });

@@ -97,6 +97,10 @@ function logBootSummary(env: EnvConfig, container: AppContainer): void {
   console.log(`[boot] port=${env.port}`);
   console.log(`[boot] llm.primary=${env.groq.name}/${env.groq.model}${env.groq.apiKey ? '' : ' (SEM CHAVE)'}`);
   console.log(`[boot] llm.fallback=${env.gemini.name}/${env.gemini.model}${env.gemini.apiKey ? '' : ' (SEM CHAVE)'}`);
+  console.log(
+    `[boot] transcription.enabled=${env.transcription.enabled ? 'sim' : 'nao'} ` +
+      `groq=${env.transcription.groqModel} gemini=${env.transcription.geminiModel}`,
+  );
   console.log(`[boot] session.store=${env.session.store} ttl=${env.session.ttlSeconds}s`);
   console.log(`[boot] erp=${env.erp.baseURL}`);
   console.log(`[boot] evolution=${env.evolution.baseURL} instance=${env.evolution.instance}`);

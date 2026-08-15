@@ -25,6 +25,20 @@ export const envSchema = z.object({
   GEMINI_MODEL: z.string().min(1).default('gemini-3.5-flash'),
   GEMINI_TIMEOUT_MS: z.coerce.number().int().positive().default(3500),
 
+  // --- Transcricao de audio (speech-to-text) ---
+  // Groq Whisper (primario) e Gemini Audio (fallback) convertem audios do
+  // WhatsApp em texto antes do processamento pela IA.
+  GROQ_TRANSCRIPTION_MODEL: z.string().min(1).default('whisper-large-v3-turbo'),
+  GEMINI_AUDIO_MODEL: z.string().min(1).default('gemini-2.0-flash'),
+  GEMINI_AUDIO_BASE_URL: z
+    .string()
+    .url()
+    .default('https://generativelanguage.googleapis.com/v1beta'),
+  AUDIO_TRANSCRIPTION_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => ['true', '1', 'yes'].includes(v.trim().toLowerCase())),
+
   // --- ERP ---
   ERP_BASE_URL: z.string().url().default('https://erp.internal/v1'),
   ERP_API_TOKEN: z.string().default(''),

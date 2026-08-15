@@ -22,6 +22,12 @@ enum FunnelStatus {
   CONCLUIDO
 }
 
+enum Department {
+  VENDAS
+  SUPORTE
+  MONTAGEM
+}
+
 model Customer {
   id            String   @id @default(cuid())
   whatsappId    String   @unique
@@ -53,6 +59,7 @@ model Conversation {
   customerId      String       @unique
   customer        Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
   funnelStatus    FunnelStatus @default(NOVO)
+  department      Department?
   humanMode       Boolean      @default(false)
   assignedAgentId String?
   assignedAgent   Agent?       @relation(fields: [assignedAgentId], references: [id])
@@ -66,6 +73,7 @@ model Conversation {
   quote    Quote?
 
   @@index([funnelStatus])
+  @@index([department])
   @@index([lastMessageAt])
 }
 

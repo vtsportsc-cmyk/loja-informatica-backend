@@ -33,6 +33,12 @@ export interface EnvConfig {
   port: number;
   groq: { name: string; apiKey: string; baseURL: string; model: string; timeoutMs: number };
   gemini: { name: string; apiKey: string; baseURL: string; model: string; timeoutMs: number };
+  transcription: {
+    enabled: boolean;
+    groqModel: string;
+    geminiModel: string;
+    geminiBaseURL: string;
+  };
   erp: { baseURL: string; apiToken: string };
   evolution: { baseURL: string; instance: string; apiKey: string; webhookSecret: string };
   databaseUrl: string;
@@ -70,6 +76,12 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): EnvConfig {
       baseURL: v.GEMINI_BASE_URL,
       model: v.GEMINI_MODEL,
       timeoutMs: v.GEMINI_TIMEOUT_MS,
+    },
+    transcription: {
+      enabled: v.AUDIO_TRANSCRIPTION_ENABLED,
+      groqModel: v.GROQ_TRANSCRIPTION_MODEL,
+      geminiModel: v.GEMINI_AUDIO_MODEL,
+      geminiBaseURL: v.GEMINI_AUDIO_BASE_URL,
     },
     erp: {
       baseURL: v.ERP_BASE_URL,
