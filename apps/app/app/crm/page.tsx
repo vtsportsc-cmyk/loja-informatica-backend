@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { formatBRL } from '@loja/catalog';
-import { FUNNEL_STATUSES, FUNNEL_STATUS_LABELS, FUNNEL_STATUS_COLORS } from '@/lib/funnel';
+import {
+  FUNNEL_STATUSES,
+  FUNNEL_STATUS_LABELS,
+  FUNNEL_STATUS_COLORS,
+  FUNNEL_STATUS_PILL,
+} from '@/lib/funnel';
 import { DEPARTMENTS, DEPARTMENT_LABELS, DEPARTMENT_COLORS, isDepartment, type Department } from '@/lib/departments';
 import { LEAD_SOURCES, LEAD_SOURCE_LABELS, LOST_REASONS, LOST_REASON_LABELS, type LeadSource, type LostReason } from '@/lib/leads';
 
@@ -100,6 +105,70 @@ function fmtDate(iso: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
   return `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+/** Pill de status do funil (fallback seguro para estados desconhecidos). */
+function statusPill(status: string): string {
+  return FUNNEL_STATUS_PILL[status as keyof typeof FUNNEL_STATUS_PILL] ?? 'bg-zinc-500/10 text-zinc-400 ring-zinc-500/30';
+}
+
+function statusDot(status: string): string {
+  return FUNNEL_STATUS_COLORS[status as keyof typeof FUNNEL_STATUS_COLORS] ?? 'bg-zinc-500';
+}
+
+function SparkIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden
+      className={`shrink-0 ${className}`}
+    >
+      <path d="M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9L12 2z" />
+    </svg>
+  );
+}
+
+function ArrowUpRightIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      className={`shrink-0 ${className}`}
+    >
+      <path d="M7 17L17 7" />
+      <path d="M8 7h9v9" />
+    </svg>
+  );
+}
+
+function SendIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      className={`shrink-0 ${className}`}
+    >
+      <path d="M22 2L11 13" />
+      <path d="M22 2l-7 20-4-9-9-4 20-7z" />
+    </svg>
+  );
 }
 
 export default function CrmPage() {
@@ -364,21 +433,25 @@ export default function CrmPage() {
   }, [orders]);
 
   return (
-    <div className="flex flex-col gap-3 p-4 lg:h-[calc(100vh-120px)]">
+    <div className="flex min-h-0 flex-col gap-3 p-4 lg:h-[calc(100vh-120px)] lg:p-5">
       {/* Barra superior */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4">
-          <h1 className="text-xl font-black tracking-tight">Painel de Operações</h1>
-          <nav className="flex gap-1">
+          <div>
+            <h1 className="text-lg font-bold tracking-tight text-zinc-50">Painel de Operações</h1>
+            <p className="text-[11px] text-zinc-500">Visão unificada de vendas, atendimento e pedidos</p>
+          </div>
+          <nav className="flex rounded-lg border border-night-700/70 bg-night-800/40 p-0.5">
             {MODULES.map((m) => (
               <button
                 key={m.id}
                 onClick={() => setModule(m.id)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
                   module === m.id
-                    ? 'bg-brand text-night-950'
-                    : 'bg-night-800 text-zinc-300 hover:text-white'
+                    ? 'bg-night-700 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-100'
                 }`}
+                title={m.hint}
               >
                 {m.label}
               </button>
@@ -387,34 +460,43 @@ export default function CrmPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            className="btn-ghost hidden items-center gap-2 !px-3 !py-1.5 !text-xs sm:flex"
+            className="btn-ghost hidden items-center gap-2 !px-2.5 !py-1.5 !text-xs sm:flex"
             onClick={() => setPaletteOpen(true)}
             title="Busca rápida (Ctrl+K)"
           >
+            <SearchIcon />
             <span>Buscar</span>
-            <kbd className="rounded border border-night-600 bg-night-800 px-1 font-mono text-[9px] text-zinc-400">
+            <kbd className="rounded border border-night-600 bg-night-800 px-1 font-mono text-[9px] text-zinc-500">
               Ctrl+K
             </kbd>
           </button>
-          <input
-            className="input w-52"
-            placeholder="Seu nome (agente)"
-            value={agentName}
-            onChange={(e) => {
-              setAgentName(e.target.value);
-              localStorage.setItem('crm-agent-name', e.target.value);
-            }}
-          />
-          <button className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={() => void refreshList()}>
+          <div className="relative">
+            <input
+              className="input w-44 !py-1.5 !text-xs"
+              placeholder="Seu nome (agente)"
+              value={agentName}
+              onChange={(e) => {
+                setAgentName(e.target.value);
+                localStorage.setItem('crm-agent-name', e.target.value);
+              }}
+            />
+            {agentName && (
+              <span className="pointer-events-none absolute right-2 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-brand" />
+            )}
+          </div>
+          <button className="btn-ghost !px-2.5 !py-1.5 !text-xs" onClick={() => void refreshList()}>
             Atualizar
           </button>
         </div>
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-900/60 bg-red-950/60 px-4 py-2 text-xs text-red-300">
-          {error}
-          <button className="ml-2 font-bold" onClick={() => setError(null)}>
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-red-900/60 bg-red-950/50 px-3 py-2 text-xs text-red-300">
+          <span>{error}</span>
+          <button
+            className="rounded border border-red-900/60 px-1.5 text-[10px] font-bold uppercase tracking-wider text-red-400 hover:bg-red-900/40"
+            onClick={() => setError(null)}
+          >
             fechar
           </button>
         </div>
@@ -425,25 +507,31 @@ export default function CrmPage() {
       ) : module === 'funil' ? (
         <div className="flex min-h-0 flex-1 flex-col gap-3">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-1.5 rounded-lg bg-night-800 p-1">
+            <div className="flex items-center rounded-lg border border-night-700/70 bg-night-800/40 p-0.5">
               <button
                 onClick={() => setViewMode('kanban')}
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  viewMode === 'kanban' ? 'bg-brand text-night-950' : 'text-zinc-400 hover:text-white'
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
+                  viewMode === 'kanban'
+                    ? 'bg-night-700 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-100'
                 }`}
               >
                 Kanban
               </button>
               <button
                 onClick={() => setViewMode('table')}
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  viewMode === 'table' ? 'bg-brand text-night-950' : 'text-zinc-400 hover:text-white'
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
+                  viewMode === 'table'
+                    ? 'bg-night-700 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-100'
                 }`}
               >
                 Tabela
               </button>
             </div>
-            <span className="text-[10px] text-zinc-500">{conversations.length} conversas</span>
+            <span className="tabular text-[10px] text-zinc-500">
+              <span className="font-semibold text-zinc-300">{conversations.length}</span> conversas
+            </span>
           </div>
           {viewMode === 'kanban' ? (
             <Kanban conversations={conversations} onOpen={openConversationInChat} />
@@ -452,15 +540,20 @@ export default function CrmPage() {
           )}
         </div>
       ) : module === 'atendimento' ? (
-        <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[300px_1fr_320px]">
-          <div className="card flex min-h-0 flex-col overflow-hidden !p-0">
-            <div className="border-b border-night-700 p-2">
-              <input
-                className="input !py-1.5 !text-xs"
-                placeholder="Buscar conversa ou pedido..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
+        <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[300px_minmax(0,1fr)_320px]">
+          <div className="surface flex min-h-0 flex-col overflow-hidden !p-0">
+            <div className="border-b border-night-700/70 p-2">
+              <div className="relative">
+                <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500">
+                  <SearchIcon />
+                </span>
+                <input
+                  className="input !py-1.5 !pl-8 !text-xs"
+                  placeholder="Buscar conversa ou pedido..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
               <div className="mt-1.5 flex items-center gap-1.5">
                 <select
                   className="select !py-1 !text-[11px]"
@@ -476,12 +569,13 @@ export default function CrmPage() {
                     </option>
                   ))}
                 </select>
-                <span className="ml-auto shrink-0 text-[10px] text-zinc-500">
-                  {filtered.length}/{conversations.length}
+                <span className="tabular ml-auto shrink-0 text-[10px] text-zinc-500">
+                  <span className="font-semibold text-zinc-300">{filtered.length}</span>/
+                  {conversations.length}
                 </span>
               </div>
             </div>
-            <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
+            <div className="scroll-slim min-h-0 flex-1 space-y-1 overflow-y-auto p-1.5">
               {filtered.length === 0 && (
                 <p className="px-2 py-6 text-center text-xs text-zinc-500">
                   Nenhuma conversa encontrada.
@@ -491,72 +585,90 @@ export default function CrmPage() {
                 <button
                   key={c.id}
                   onClick={() => void openConversation(c.id)}
-                  className={`w-full rounded-lg px-2 py-1.5 text-left transition-colors ${
-                    selectedId === c.id ? 'bg-brand/15' : 'hover:bg-night-800'
+                  className={`group w-full rounded-lg border px-2 py-1.5 text-left transition-all ${
+                    selectedId === c.id
+                      ? 'border-night-500 bg-night-800'
+                      : 'border-transparent hover:bg-night-800/70'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-xs font-semibold">
-                      {c.customerName || c.whatsappId}
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot(c.funnelStatus)}`} />
+                      <span className="truncate text-xs font-semibold text-zinc-100">
+                        {c.customerName || c.whatsappId}
+                      </span>
                     </span>
-                    <span className="shrink-0 text-[10px] text-zinc-500">
-                      {fmtTime(c.lastMessageAt)}
+                    <span className="flex shrink-0 items-center gap-1">
+                      {c.unreadCount > 0 && (
+                        <span className="tabular rounded-full bg-red-500 px-1.5 py-px text-[9px] font-bold text-white">
+                          {c.unreadCount}
+                        </span>
+                      )}
+                      <span className="tabular text-[10px] text-zinc-500">
+                        {fmtTime(c.lastMessageAt)}
+                      </span>
                     </span>
                   </div>
-                  <div className="mt-0.5 flex items-center gap-1 text-[10px]">
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full ${FUNNEL_STATUS_COLORS[c.funnelStatus as keyof typeof FUNNEL_STATUS_COLORS] ?? 'bg-zinc-500'}`}
-                    />
-                    <span className="truncate text-zinc-400">{c.whatsappId}</span>
+                  <div className="mt-0.5 flex items-center gap-1 pl-3 text-[10px]">
+                    <span className="truncate text-zinc-500">{c.whatsappId}</span>
                     {c.department && (
-                      <span className="rounded bg-brand/15 px-1 text-brand">
+                      <span className="chip text-zinc-500">
                         {DEPARTMENT_LABELS[c.department as Department] ?? c.department}
                       </span>
                     )}
                     {c.quote && (
-                      <span className="ml-auto font-mono text-zinc-500">{c.quote.code}</span>
+                      <span className="ml-auto shrink-0 font-mono text-zinc-600">{c.quote.code}</span>
                     )}
                   </div>
-                  {(c.unreadCount > 0 || c.humanMode) && (
-                    <div className="mt-0.5 flex items-center gap-1 text-[10px]">
-                      {c.unreadCount > 0 && (
-                        <span className="rounded bg-red-500 px-1 font-bold text-white">
-                          {c.unreadCount}
-                        </span>
-                      )}
-                      <span
-                        className={`rounded px-1 ${
-                          c.humanMode
-                            ? 'bg-brand/20 text-brand'
-                            : 'bg-blue-500/20 text-blue-300'
-                        }`}
-                      >
-                        {c.humanMode
-                          ? `humano${c.assignedAgentId ? `:${c.assignedAgentId}` : ''}`
-                          : 'IA'}
+                  <div className="mt-1 flex items-center gap-1 pl-3 text-[10px]">
+                    <span
+                      className={`inline-flex items-center rounded-md px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider ring-1 ring-inset ${
+                        c.humanMode
+                          ? 'bg-brand/10 text-brand ring-brand/25'
+                          : 'bg-sky-500/10 text-sky-300 ring-sky-500/25'
+                      }`}
+                    >
+                      {c.humanMode ? `humano${c.assignedAgentId ? `:${c.assignedAgentId}` : ''}` : 'IA'}
+                    </span>
+                    {c.funnelStatus === 'ALTA_VALOR' && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 px-1.5 text-[9px] font-bold uppercase tracking-wider text-rose-300 ring-1 ring-inset ring-rose-500/30">
+                        <SparkIcon /> alto valor
                       </span>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="card flex min-h-0 flex-col overflow-hidden !p-0">
+          <div className="surface flex min-h-0 flex-col overflow-hidden !p-0">
             {!selected ? (
               <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">
                 Selecione uma conversa à esquerda.
               </div>
             ) : (
               <>
-                <div className="flex items-center justify-between border-b border-night-700 px-3 py-2">
-                  <div>
-                    <h2 className="text-sm font-bold">{selected.customerName || selected.whatsappId}</h2>
-                    <p className="text-[10px] text-zinc-500">
+                <div className="flex items-center justify-between gap-2 border-b border-night-700/70 bg-night-900/80 px-3 py-2 backdrop-blur">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h2 className="truncate text-sm font-semibold text-zinc-100">
+                        {selected.customerName || selected.whatsappId}
+                      </h2>
+                      <span
+                        className={`inline-flex items-center rounded-md px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider ring-1 ring-inset ${
+                          selected.humanMode
+                            ? 'bg-brand/10 text-brand ring-brand/25'
+                            : 'bg-sky-500/10 text-sky-300 ring-sky-500/25'
+                        }`}
+                      >
+                        {selected.humanMode ? 'humano' : 'IA'}
+                      </span>
+                    </div>
+                    <p className="truncate text-[10px] text-zinc-500">
                       {selected.whatsappId} · atualizado {fmtDate(selected.lastMessageAt)}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex shrink-0 items-center gap-2">
                     {selected.humanMode ? (
                       <button
                         className="btn-ghost !px-2 !py-1 !text-[11px]"
@@ -572,15 +684,12 @@ export default function CrmPage() {
                         Assumir (humano)
                       </button>
                     )}
-                    <span className="text-[10px] text-zinc-500">
-                      {selected.humanMode ? 'atendimento humano' : 'IA respondendo'}
-                    </span>
                   </div>
                 </div>
 
-                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+                <div className="scroll-slim min-h-0 flex-1 space-y-2 overflow-y-auto bg-night-950/50 p-3">
                   {detail?.messages.length === 0 && (
-                    <p className="text-center text-xs text-zinc-500">Sem mensagens ainda.</p>
+                    <p className="py-10 text-center text-xs text-zinc-500">Sem mensagens ainda.</p>
                   )}
                   {detail?.messages.map((m) => (
                     <div
@@ -588,14 +697,18 @@ export default function CrmPage() {
                       className={`flex ${m.direction === 'inbound' ? 'justify-start' : 'justify-end'}`}
                     >
                       <div
-                        className={`max-w-[75%] rounded-xl px-3 py-1.5 text-xs ${
+                        className={`max-w-[75%] rounded-xl px-3 py-1.5 text-xs shadow-card ${
                           m.direction === 'inbound'
-                            ? 'bg-night-700 text-zinc-100'
-                            : 'bg-brand/20 text-brand-dark'
+                            ? 'rounded-tl-sm border border-night-700/70 bg-night-800/80 text-zinc-100'
+                            : 'rounded-tr-sm border border-brand/25 bg-brand/15 text-zinc-50'
                         }`}
                       >
                         <p className="whitespace-pre-wrap">{m.text}</p>
-                        <p className="mt-0.5 text-[9px] opacity-70">
+                        <p
+                          className={`mt-0.5 text-[9px] ${
+                            m.direction === 'inbound' ? 'text-zinc-500' : 'text-brand/70'
+                          }`}
+                        >
                           {m.direction === 'inbound' ? 'cliente' : m.agentId ? m.agentId : 'IA'} ·{' '}
                           {fmtTime(m.createdAt)}
                         </p>
@@ -604,7 +717,7 @@ export default function CrmPage() {
                   ))}
                 </div>
 
-                <div className="border-t border-night-700 p-3">
+                <div className="border-t border-night-700/70 bg-night-900/80 p-3 backdrop-blur">
                   <div className="flex gap-2">
                     <input
                       className="input !py-1.5 !text-xs"
@@ -615,7 +728,12 @@ export default function CrmPage() {
                         if (e.key === 'Enter') void sendMessage();
                       }}
                     />
-                    <button className="btn-primary !px-3 !py-1.5 !text-xs" onClick={() => void sendMessage()}>
+                    <button
+                      className="btn-primary shrink-0 !px-3 !py-1.5 !text-xs"
+                      disabled={!draft.trim()}
+                      onClick={() => void sendMessage()}
+                    >
+                      <SendIcon />
                       Enviar
                     </button>
                   </div>
@@ -624,29 +742,33 @@ export default function CrmPage() {
             )}
           </div>
 
-          <div className="card flex min-h-0 flex-col overflow-hidden !p-0">
+          <div className="surface flex min-h-0 flex-col overflow-hidden !p-0">
             {!selected ? (
               <p className="p-4 text-xs text-zinc-500">Contexto do cliente aparecerá aqui.</p>
             ) : (
               <>
-                <div className="flex gap-1 border-b border-night-700 p-2">
+                <div className="flex gap-0.5 border-b border-night-700/70 bg-night-900/80 p-1.5 backdrop-blur">
                   <button
                     onClick={() => setSidebarTab('resumo')}
-                    className={`rounded-md px-3 py-1 text-[11px] font-semibold transition-colors ${
-                      sidebarTab === 'resumo' ? 'bg-brand text-night-950' : 'text-zinc-400 hover:text-white'
+                    className={`flex-1 rounded-md px-3 py-1 text-[11px] font-semibold transition-all ${
+                      sidebarTab === 'resumo'
+                        ? 'bg-night-700 text-white shadow-sm'
+                        : 'text-zinc-400 hover:text-zinc-100'
                     }`}
                   >
                     Resumo
                   </button>
                   <button
                     onClick={() => setSidebarTab('anotacoes')}
-                    className={`rounded-md px-3 py-1 text-[11px] font-semibold transition-colors ${
-                      sidebarTab === 'anotacoes' ? 'bg-brand text-night-950' : 'text-zinc-400 hover:text-white'
+                    className={`flex-1 rounded-md px-3 py-1 text-[11px] font-semibold transition-all ${
+                      sidebarTab === 'anotacoes'
+                        ? 'bg-night-700 text-white shadow-sm'
+                        : 'text-zinc-400 hover:text-zinc-100'
                     }`}
                   >
                     Anotações
                     {detail && detail.notes.length > 0 && (
-                      <span className="ml-1 rounded bg-night-700 px-1 text-[9px] text-zinc-300">
+                      <span className="tabular ml-1 rounded bg-night-800 px-1 text-[9px] text-zinc-400">
                         {detail.notes.length}
                       </span>
                     )}
@@ -655,7 +777,7 @@ export default function CrmPage() {
                 {sidebarTab === 'resumo' ? (
                   <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
                 <div>
-                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
                     Atribuição
                   </h3>
                   <div className="mt-1.5 space-y-1.5">
@@ -707,7 +829,7 @@ export default function CrmPage() {
                 </div>
 
                 <div>
-                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
                     Origem do lead
                   </h3>
                   <div className="mt-1.5 flex items-center gap-2">
@@ -734,7 +856,7 @@ export default function CrmPage() {
                 </div>
 
                 <div>
-                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
                     Funil
                   </h3>
                   <div className="mt-1.5 flex items-center gap-2">
@@ -765,7 +887,7 @@ export default function CrmPage() {
                 </div>
 
                 <div>
-                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
                     Pedido
                   </h3>
                   {selected.quote ? (
@@ -778,7 +900,7 @@ export default function CrmPage() {
                 </div>
 
                 <div>
-                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
                     Timeline
                   </h3>
                   <Timeline events={detail?.timeline ?? []} />
@@ -843,23 +965,31 @@ function Kanban({
   onOpen: (id: string) => void;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto">
+    <div className="scroll-slim flex min-h-0 flex-1 gap-3 overflow-x-auto pb-1">
       {FUNNEL_STATUSES.map((status) => {
         const cards = conversations.filter((c) => c.funnelStatus === status);
+        const totalValue = cards.reduce((sum, c) => sum + (c.quote?.pixTotalCents ?? 0), 0);
         return (
-          <div key={status} className="card flex min-w-[250px] flex-col !p-0">
-            <div className="sticky top-0 flex items-center justify-between border-b border-night-700 px-3 py-2">
+          <div key={status} className="surface flex min-w-[252px] max-w-[260px] flex-col !p-0">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-night-700/70 bg-night-900/95 px-3 py-2 backdrop-blur">
               <div className="flex items-center gap-2">
-                <span
-                  className={`h-2 w-2 rounded-full ${FUNNEL_STATUS_COLORS[status] ?? 'bg-zinc-500'}`}
-                />
-                <span className="text-xs font-bold">{FUNNEL_STATUS_LABELS[status]}</span>
+                <span className={`h-2 w-2 rounded-full ${statusDot(status)}`} />
+                <span className="text-xs font-semibold text-zinc-200">
+                  {FUNNEL_STATUS_LABELS[status]}
+                </span>
               </div>
-              <span className="rounded bg-night-700 px-1.5 text-[10px] text-zinc-400">
+              <span className="tabular rounded-md bg-night-800 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-400">
                 {cards.length}
               </span>
             </div>
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
+            {totalValue > 0 && (
+              <div className="border-b border-night-700/60 px-3 py-1.5">
+                <p className="tabular text-[10px] text-zinc-500">
+                  {formatBRL(totalValue)} <span className="text-zinc-600">PIX</span>
+                </p>
+              </div>
+            )}
+            <div className="scroll-slim min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
               {cards.length === 0 && (
                 <p className="px-2 py-6 text-center text-[10px] text-zinc-600">vazio</p>
               )}
@@ -867,35 +997,61 @@ function Kanban({
                 <button
                   key={c.id}
                   onClick={() => onOpen(c.id)}
-                  className="w-full rounded-lg border border-night-700 bg-night-800 p-2 text-left transition-colors hover:border-brand/50"
+                  className={`group w-full rounded-lg border bg-night-800/60 p-2 text-left transition-all hover:-translate-y-px hover:border-night-500 hover:bg-night-800 hover:shadow-card ${
+                    c.funnelStatus === 'ALTA_VALOR'
+                      ? 'border-rose-500/25 hover:border-rose-500/50'
+                      : 'border-night-700/70'
+                  }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-xs font-semibold">
+                    <span className="truncate text-xs font-semibold text-zinc-100">
                       {c.customerName || c.whatsappId}
                     </span>
-                    <span className="shrink-0 text-[10px] text-zinc-500">
-                      {fmtTime(c.lastMessageAt)}
+                    <span className="flex shrink-0 items-center gap-1">
+                      <span className="tabular text-[10px] text-zinc-500">
+                        {fmtTime(c.lastMessageAt)}
+                      </span>
+                      <ArrowUpRightIcon className="text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100" />
                     </span>
                   </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-zinc-400">
-                    {c.quote && (
-                      <>
-                        <span className="rounded bg-brand/15 px-1 font-mono text-brand">
-                          {c.quote.code}
+
+                  {c.funnelStatus === 'ALTA_VALOR' && (
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-rose-300 ring-1 ring-inset ring-rose-500/30 shadow-glow">
+                        <SparkIcon /> Alto valor
+                      </span>
+                      {c.quote && (
+                        <span className="tabular text-[10px] font-semibold text-rose-200">
+                          {formatBRL(c.quote.pixTotalCents)}
                         </span>
-                        <span className="font-semibold text-brand">
+                      )}
+                    </div>
+                  )}
+
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[10px] text-zinc-400">
+                    {c.quote && c.funnelStatus !== 'ALTA_VALOR' && (
+                      <>
+                        <span className="chip font-mono !text-brand">{c.quote.code}</span>
+                        <span className="tabular font-semibold text-brand">
                           {formatBRL(c.quote.pixTotalCents)}
                         </span>
                       </>
                     )}
+                    {c.department && (
+                      <span className="chip text-zinc-500">
+                        {DEPARTMENT_LABELS[c.department as Department] ?? c.department}
+                      </span>
+                    )}
                     {c.unreadCount > 0 && (
-                      <span className="rounded bg-red-500 px-1 font-bold text-white">
+                      <span className="tabular rounded-full bg-red-500 px-1.5 py-px font-bold text-white">
                         {c.unreadCount}
                       </span>
                     )}
                     <span
-                      className={`ml-auto rounded px-1 ${
-                        c.humanMode ? 'bg-brand/20 text-brand' : 'bg-blue-500/20 text-blue-300'
+                      className={`ml-auto inline-flex items-center rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ring-1 ring-inset ${
+                        c.humanMode
+                          ? 'bg-brand/10 text-brand ring-brand/25'
+                          : 'bg-sky-500/10 text-sky-300 ring-sky-500/25'
                       }`}
                     >
                       {c.humanMode ? 'humano' : 'IA'}
@@ -922,10 +1078,10 @@ function OrderSummary({
 }) {
   const emitted = Boolean(quote.blingNumber);
   return (
-    <div className="mt-1.5 space-y-2 rounded-lg border border-night-700 bg-night-800 p-2">
-      <div className="flex items-center justify-between">
+    <div className="mt-1.5 space-y-2 rounded-lg border border-night-700/70 bg-night-800/50 p-2">
+      <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-xs font-bold text-brand">{quote.code}</span>
-        <span className="text-[10px] text-zinc-400">{quote.items.length} itens</span>
+        <span className="tabular text-[10px] text-zinc-500">{quote.items.length} itens</span>
       </div>
       <ul className="space-y-1 text-[11px] text-zinc-300">
         {quote.items.slice(0, 6).map((item, i) => (
@@ -933,7 +1089,7 @@ function OrderSummary({
             <span className="truncate">
               {item.quantity}x {item.name}
             </span>
-            <span className="shrink-0 text-zinc-400">
+            <span className="tabular shrink-0 text-zinc-400">
               {formatBRL(item.unitPriceCents * item.quantity)}
             </span>
           </li>
@@ -942,27 +1098,27 @@ function OrderSummary({
           <li className="text-[10px] text-zinc-500">+ {quote.items.length - 6} itens...</li>
         )}
       </ul>
-      <dl className="space-y-0.5 border-t border-night-700 pt-1.5 text-[11px]">
+      <dl className="divider space-y-0.5 pt-1.5 text-[11px]">
         <div className="flex justify-between">
-          <dt className="text-zinc-400">Subtotal</dt>
-          <dd>{formatBRL(quote.totalCents)}</dd>
+          <dt className="text-zinc-500">Subtotal</dt>
+          <dd className="tabular text-zinc-300">{formatBRL(quote.totalCents)}</dd>
         </div>
         <div className="flex justify-between text-brand">
           <dt>PIX</dt>
-          <dd>{formatBRL(quote.pixTotalCents)}</dd>
+          <dd className="tabular">{formatBRL(quote.pixTotalCents)}</dd>
         </div>
         <div className="flex justify-between text-zinc-500">
           <dt>ou {quote.installments}x de</dt>
-          <dd>{formatBRL(quote.monthlyValueCents)}</dd>
+          <dd className="tabular">{formatBRL(quote.monthlyValueCents)}</dd>
         </div>
       </dl>
       {emitted ? (
-        <p className="rounded bg-emerald-500/15 px-2 py-1 text-[10px] text-emerald-300">
+        <p className="rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-300 ring-1 ring-inset ring-emerald-500/25">
           Pedido Bling #{quote.blingNumber}
           {quote.blingStatus ? ` · ${quote.blingStatus}` : ''} — emissão/expedição iniciada.
         </p>
       ) : status === 'AGUARDANDO_NF' ? (
-        <p className="rounded bg-amber-500/15 px-2 py-1 text-[10px] text-amber-300">
+        <p className="rounded-md bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300 ring-1 ring-inset ring-amber-500/25">
           Aguardando emissão da NF (Bling).
         </p>
       ) : (
@@ -994,19 +1150,19 @@ function OrdersTable({
         <StatCard label="Emitidos no Bling" value={String(stats.blingEmitted)} />
       </div>
 
-      <div className="card min-h-0 flex-1 overflow-auto !p-0">
-        <table className="w-full text-left text-xs">
-          <thead className="sticky top-0 bg-night-800 text-[10px] uppercase tracking-wider text-zinc-400">
+      <div className="surface min-h-0 flex-1 overflow-auto !p-0">
+        <table className="w-full border-collapse text-xs">
+          <thead className="sticky top-0 z-10">
             <tr>
-              <th className="px-3 py-2">Código</th>
-              <th className="px-3 py-2">Cliente</th>
-              <th className="px-3 py-2">Atualizado</th>
-              <th className="px-3 py-2 text-right">Itens</th>
-              <th className="px-3 py-2 text-right">Total PIX</th>
-              <th className="px-3 py-2 text-right">Parcelado</th>
-              <th className="px-3 py-2">Funil</th>
-              <th className="px-3 py-2">Bling</th>
-              <th className="px-3 py-2 text-right">Ações</th>
+              <th className="table-head">Código</th>
+              <th className="table-head">Cliente</th>
+              <th className="table-head">Atualizado</th>
+              <th className="table-head text-right">Itens</th>
+              <th className="table-head text-right">Total PIX</th>
+              <th className="table-head text-right">Parcelado</th>
+              <th className="table-head">Funil</th>
+              <th className="table-head">Bling</th>
+              <th className="table-head text-right">Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -1020,31 +1176,40 @@ function OrdersTable({
             {orders.map((c) => {
               const q = c.quote!;
               return (
-                <tr key={c.id} className="border-t border-night-800 hover:bg-night-800/60">
-                  <td className="px-3 py-2 font-mono font-bold text-brand">{q.code}</td>
+                <tr
+                  key={c.id}
+                  className="border-b border-night-800/70 transition-colors hover:bg-night-800/40"
+                >
+                  <td className="px-3 py-2 font-mono font-semibold text-brand">{q.code}</td>
                   <td className="px-3 py-2">
-                    <span className="font-semibold">{c.customerName || c.whatsappId}</span>
+                    <span className="font-medium text-zinc-100">{c.customerName || c.whatsappId}</span>
                     <span className="block text-[10px] text-zinc-500">{c.whatsappId}</span>
                   </td>
-                  <td className="px-3 py-2 text-zinc-400">{fmtDate(c.lastMessageAt)}</td>
-                  <td className="px-3 py-2 text-right">{q.items.length}</td>
-                  <td className="px-3 py-2 text-right font-semibold text-brand">
+                  <td className="tabular px-3 py-2 text-zinc-400">{fmtDate(c.lastMessageAt)}</td>
+                  <td className="tabular px-3 py-2 text-right text-zinc-300">{q.items.length}</td>
+                  <td className="tabular px-3 py-2 text-right font-semibold text-brand">
                     {formatBRL(q.pixTotalCents)}
                   </td>
-                  <td className="px-3 py-2 text-right text-zinc-400">
+                  <td className="tabular px-3 py-2 text-right text-zinc-400">
                     {q.installments}x de {formatBRL(q.monthlyValueCents)}
                   </td>
                   <td className="px-3 py-2">
                     <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                        FUNNEL_STATUS_COLORS[c.funnelStatus as keyof typeof FUNNEL_STATUS_COLORS] ?? 'bg-zinc-500'
-                      } bg-opacity-20 text-zinc-100`}
+                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${statusPill(c.funnelStatus)}`}
                     >
                       {FUNNEL_STATUS_LABELS[c.funnelStatus as keyof typeof FUNNEL_STATUS_LABELS] ?? c.funnelStatus}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-zinc-400">
-                    {q.blingNumber ? `#${q.blingNumber}` : q.blingStatus ?? '—'}
+                  <td className="tabular px-3 py-2 text-zinc-400">
+                    {q.blingNumber ? (
+                      <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] text-emerald-300 ring-1 ring-inset ring-emerald-500/25">
+                        #{q.blingNumber}
+                      </span>
+                    ) : q.blingStatus ? (
+                      <span className="text-zinc-500">{q.blingStatus}</span>
+                    ) : (
+                      <span className="text-zinc-600">—</span>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex justify-end gap-1">
@@ -1070,9 +1235,9 @@ function OrdersTable({
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="card">
-      <p className="text-[10px] uppercase tracking-wider text-zinc-400">{label}</p>
-      <p className="mt-0.5 text-lg font-black text-zinc-100">{value}</p>
+    <div className="surface">
+      <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">{label}</p>
+      <p className="tabular mt-0.5 text-xl font-bold tracking-tight text-zinc-50">{value}</p>
     </div>
   );
 }
@@ -1096,13 +1261,18 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
     );
   }
   return (
-    <ol className="mt-1.5 space-y-2">
-      {events.map((ev) => {
+    <ol className="mt-1.5 space-y-3">
+      {events.map((ev, i) => {
         const meta = TIMELINE_TYPE_META[ev.type] ?? { label: ev.type, color: 'bg-zinc-500' };
+        const isLast = i === events.length - 1;
         return (
-          <li key={ev.id} className="relative flex gap-2 pl-4">
+          <li key={ev.id} className="relative flex gap-2.5 pl-4">
             <span
-              className={`absolute left-0 top-1 h-2 w-2 rounded-full ${meta.color}`}
+              className={`absolute left-[3px] top-2.5 w-px bg-night-700/70 ${isLast ? 'h-0' : 'h-full'}`}
+              aria-hidden
+            />
+            <span
+              className={`absolute left-0 top-1 h-[7px] w-[7px] rounded-full ring-2 ring-night-900 ${meta.color}`}
               aria-hidden
             />
             <div className="min-w-0 flex-1">
@@ -1110,9 +1280,9 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
               {ev.detail && (
                 <p className="mt-0.5 text-[10px] leading-snug text-zinc-400">{ev.detail}</p>
               )}
-              <p className="mt-0.5 text-[9px] text-zinc-500">
-                <span className="rounded bg-night-800 px-1">{meta.label}</span>{' '}
-                {fmtDate(ev.createdAt)}
+              <p className="mt-1 text-[9px] text-zinc-500">
+                <span className="chip text-zinc-500">{meta.label}</span>{' '}
+                <span className="tabular">{fmtDate(ev.createdAt)}</span>
               </p>
             </div>
           </li>
@@ -1136,24 +1306,36 @@ function LostReasonModal({
   onCancel: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-night-950/80 p-4">
-      <div className="card w-full max-w-sm">
-        <h3 className="text-sm font-bold">Marcar como perdido</h3>
-        <p className="mt-1 text-xs text-zinc-400">
-          A conversa de <span className="font-semibold text-zinc-200">{customerName ?? '—'}</span> será
-          movida para <span className="font-semibold text-red-300">Cancelado / Perdido</span>.
-        </p>
-        <p className="mt-3 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-night-950/70 p-4 backdrop-blur-sm">
+      <div className="surface w-full max-w-sm p-4 shadow-pop">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-50">Marcar como perdido</h3>
+            <p className="mt-1 text-xs text-zinc-400">
+              A conversa de <span className="font-semibold text-zinc-200">{customerName ?? '—'}</span>{' '}
+              será movida para{' '}
+              <span className="font-semibold text-red-300">Cancelado / Perdido</span>.
+            </p>
+          </div>
+          <button
+            className="rounded-md border border-night-700 px-1.5 text-[11px] text-zinc-500 transition-colors hover:border-night-500 hover:text-zinc-200"
+            onClick={onCancel}
+            aria-label="Fechar"
+          >
+            ✕
+          </button>
+        </div>
+        <p className="mt-4 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
           Motivo da perda
         </p>
         <div className="mt-1.5 space-y-1.5">
           {LOST_REASONS.map((r) => (
             <label
               key={r}
-              className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-colors ${
+              className={`flex cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2 text-xs transition-colors ${
                 value === r
-                  ? 'border-red-500/60 bg-red-950/40 text-red-200'
-                  : 'border-night-700 bg-night-800 text-zinc-300 hover:border-night-500'
+                  ? 'border-red-500/50 bg-red-950/30 text-red-200 ring-1 ring-inset ring-red-500/30'
+                  : 'border-night-700 bg-night-800/50 text-zinc-300 hover:border-night-500'
               }`}
             >
               <input
@@ -1202,16 +1384,16 @@ function DenseTable({
   );
 
   return (
-    <div className="card min-h-0 flex-1 overflow-auto !p-0">
+    <div className="surface min-h-0 flex-1 overflow-auto !p-0">
       <table className="w-full border-collapse text-xs">
-        <thead className="sticky top-0 z-10 bg-night-800 text-[10px] uppercase tracking-wider text-zinc-400">
+        <thead className="sticky top-0 z-10">
           <tr>
-            <th className="px-3 py-2 text-left">Cliente</th>
-            <th className="px-3 py-2 text-left">Telefone</th>
-            <th className="px-3 py-2 text-left">Peças Principais</th>
-            <th className="px-3 py-2 text-left">Valor PIX/Parcelado</th>
-            <th className="px-3 py-2 text-left">Status</th>
-            <th className="px-3 py-2 text-left">Atendente Responsável</th>
+            <th className="table-head">Cliente</th>
+            <th className="table-head">Telefone</th>
+            <th className="table-head">Peças Principais</th>
+            <th className="table-head">Valor PIX/Parcelado</th>
+            <th className="table-head">Status</th>
+            <th className="table-head">Atendente Responsável</th>
           </tr>
         </thead>
         <tbody>
@@ -1232,22 +1414,27 @@ function DenseTable({
               <tr
                 key={c.id}
                 onClick={() => onOpen(c.id)}
-                className="cursor-pointer border-t border-night-800 transition-colors hover:bg-brand/10"
+                className="group cursor-pointer border-b border-night-800/70 transition-colors hover:bg-night-800/40"
               >
                 <td className="px-3 py-2">
                   <div className="flex items-center gap-2">
                     <span
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${FUNNEL_STATUS_COLORS[c.funnelStatus as keyof typeof FUNNEL_STATUS_COLORS] ?? 'bg-zinc-500'}`}
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot(c.funnelStatus)}`}
                     />
-                    <span className="font-semibold text-zinc-100">
+                    <span className="font-medium text-zinc-100">
                       {c.customerName || c.whatsappId}
                     </span>
                     {c.quote && (
                       <span className="font-mono text-[10px] text-brand">{c.quote.code}</span>
                     )}
+                    {c.funnelStatus === 'ALTA_VALOR' && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 px-1.5 text-[8px] font-bold uppercase tracking-wider text-rose-300 ring-1 ring-inset ring-rose-500/30">
+                        <SparkIcon /> alto valor
+                      </span>
+                    )}
                   </div>
                 </td>
-                <td className="px-3 py-2 text-zinc-400">{c.whatsappId}</td>
+                <td className="tabular px-3 py-2 text-zinc-400">{c.whatsappId}</td>
                 <td className="max-w-[260px] truncate px-3 py-2 text-zinc-300">
                   {items.length === 0 ? (
                     <span className="text-zinc-600">—</span>
@@ -1260,7 +1447,7 @@ function DenseTable({
                     </>
                   )}
                 </td>
-                <td className="px-3 py-2">
+                <td className="tabular px-3 py-2">
                   {c.quote ? (
                     <>
                       <span className="font-semibold text-brand">
@@ -1276,14 +1463,14 @@ function DenseTable({
                 </td>
                 <td className="px-3 py-2">
                   <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                      FUNNEL_STATUS_COLORS[c.funnelStatus as keyof typeof FUNNEL_STATUS_COLORS] ?? 'bg-zinc-500'
-                    } bg-opacity-20 text-zinc-100`}
+                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${statusPill(c.funnelStatus)}`}
                   >
                     {FUNNEL_STATUS_LABELS[c.funnelStatus as keyof typeof FUNNEL_STATUS_LABELS] ?? c.funnelStatus}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-zinc-400">{agentLabel(c.assignedAgentId)}</td>
+                <td className="tabular px-3 py-2 text-zinc-400">
+                  {agentLabel(c.assignedAgentId)}
+                </td>
               </tr>
             );
           })}
@@ -1308,25 +1495,29 @@ function NotesPanel({
 }) {
   return (
     <div className="flex h-full flex-col">
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+      <div className="scroll-slim min-h-0 flex-1 space-y-2 overflow-y-auto">
         {notes.length === 0 && (
           <p className="py-6 text-center text-xs text-zinc-500">
             Nenhuma anotação ainda. Registre observações da negociação aqui.
           </p>
         )}
         {notes.map((n) => (
-          <div key={n.id} className="rounded-lg border border-night-700 bg-night-800 p-2">
+          <div
+            key={n.id}
+            className="rounded-lg border border-night-700/70 bg-night-800/50 p-2 transition-colors hover:border-night-600"
+          >
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] font-semibold text-brand">
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-brand">
+                <span className="h-1 w-1 rounded-full bg-brand" />
                 {n.agentId || 'Atendente'}
               </span>
-              <span className="text-[9px] text-zinc-500">{fmtDate(n.createdAt)}</span>
+              <span className="tabular text-[9px] text-zinc-500">{fmtDate(n.createdAt)}</span>
             </div>
             <p className="mt-1 whitespace-pre-wrap text-xs leading-snug text-zinc-200">{n.text}</p>
           </div>
         ))}
       </div>
-      <div className="mt-2 border-t border-night-700 pt-2">
+      <div className="divider mt-2 pt-2">
         <textarea
           className="input min-h-[72px] !text-xs"
           placeholder={`Anotação interna${agentName ? ` (${agentName})` : ''}...`}
@@ -1407,29 +1598,29 @@ function CommandPalette({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-night-950/80 p-4 pt-[12vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-night-950/70 p-4 pt-[12vh] backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="card w-full max-w-xl overflow-hidden !p-0">
-        <div className="flex items-center gap-2 border-b border-night-700 px-3">
+      <div className="surface w-full max-w-xl overflow-hidden !p-0 shadow-pop">
+        <div className="flex items-center gap-2.5 border-b border-night-700/70 px-3">
           <span className="text-zinc-500">
             <SearchIcon />
           </span>
           <input
             ref={inputRef}
-            className="input !border-0 !bg-transparent !px-0 !py-3 !text-sm !shadow-none"
+            className="input !border-0 !bg-transparent !px-0 !py-3 !text-sm !shadow-none !ring-0"
             placeholder="Buscar por orçamento, cliente, telefone ou peça..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
           />
-          <kbd className="ml-auto rounded border border-night-600 bg-night-800 px-1 font-mono text-[9px] text-zinc-400">
+          <kbd className="ml-auto rounded border border-night-600 bg-night-800 px-1 font-mono text-[9px] text-zinc-500">
             Esc
           </kbd>
         </div>
-        <div className="max-h-[50vh] overflow-y-auto p-1.5">
+        <div className="scroll-slim max-h-[50vh] overflow-y-auto p-1.5">
           {results.length === 0 && (
             <p className="px-3 py-8 text-center text-xs text-zinc-500">
               Nenhum resultado para “{query}”.
@@ -1443,11 +1634,11 @@ function CommandPalette({
                 onClick={() => onSelect(c.id)}
                 onMouseEnter={() => setHighlight(i)}
                 className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
-                  i === highlight ? 'bg-brand/15' : 'hover:bg-night-800'
+                  i === highlight ? 'bg-night-700/70' : 'hover:bg-night-800/60'
                 }`}
               >
                 <span
-                  className={`h-2 w-2 shrink-0 rounded-full ${FUNNEL_STATUS_COLORS[c.funnelStatus as keyof typeof FUNNEL_STATUS_COLORS] ?? 'bg-zinc-500'}`}
+                  className={`h-2 w-2 shrink-0 rounded-full ${statusDot(c.funnelStatus)}`}
                 />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-semibold text-zinc-100">
@@ -1461,11 +1652,13 @@ function CommandPalette({
                   </span>
                 </span>
                 {match && (
-                  <span className="shrink-0 rounded bg-brand/15 px-1.5 font-mono text-[10px] text-brand">
+                  <span className="shrink-0 rounded-md bg-brand/10 px-1.5 font-mono text-[10px] text-brand ring-1 ring-inset ring-brand/25">
                     {match}
                   </span>
                 )}
-                <span className="shrink-0 text-[10px] text-zinc-500">
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold ring-1 ring-inset ${statusPill(c.funnelStatus)}`}
+                >
                   {FUNNEL_STATUS_LABELS[c.funnelStatus as keyof typeof FUNNEL_STATUS_LABELS] ?? c.funnelStatus}
                 </span>
               </button>
