@@ -11,6 +11,7 @@ import {
 } from '@/lib/funnel';
 import { DEPARTMENTS, DEPARTMENT_LABELS, DEPARTMENT_COLORS, isDepartment, type Department } from '@/lib/departments';
 import { LEAD_SOURCES, LEAD_SOURCE_LABELS, LOST_REASONS, LOST_REASON_LABELS, type LeadSource, type LostReason } from '@/lib/leads';
+import { SystemHealthBadge } from '@/components/system-health';
 
 type ModuleId = 'funil' | 'atendimento' | 'pedidos';
 
@@ -487,6 +488,7 @@ export default function CrmPage() {
           <button className="btn-ghost !px-2.5 !py-1.5 !text-xs" onClick={() => void refreshList()}>
             Atualizar
           </button>
+          <SystemHealthBadge />
         </div>
       </div>
 

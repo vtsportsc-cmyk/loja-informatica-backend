@@ -24,6 +24,12 @@ export interface EvolutionMedia {
   fileName?: string;
 }
 
+export interface EvolutionConnectionState {
+  connected: boolean;
+  state: string;
+  error?: string;
+}
+
 export class EvolutionApi {
   private readonly baseURL: string;
   private readonly instance: string;
@@ -54,6 +60,29 @@ export class EvolutionApi {
       ...(media.fileName ? { fileName: media.fileName } : {}),
     });
     if (!res.ok) throw new Error(`Evolution sendMedia HTTP ${res.status}: ${await res.text().catch(() => '')}`);
+  }
+
+  /**
+   * Consulta o estado de conexao da instancia no WhatsApp (monitoramento).
+   * Endpoint: GET /instance/connectionState/{instance}. `open` = conectado.
+   */
+  async getConnectionState(): Promise<EvolutionConnectionState> {
+    try {
+      const res = await this.fetchImpl(
+        `${this.baseURL}/instance/connectionState/${encodeURIComponent(this.instance)}`,
+        { method: 'GET', headers: { apikey: this.apiKey } },
+      );
+      if (!res.ok) {
+        return { connected: false, state: 'error', error: `HTTP ${res.status}` };
+      }
+      const body = (await res.json().catch(() => ({}))) as {
+        instance?: { state?: string };
+      };
+      const state = body.instance?.state ?? 'unknown';
+      return { connected: state === 'open', state };
+    } catch (err) {
+      return { connected: false, state: 'error', error: (err as Error).message };
+    }
   }
 
   /** Compat com o antigo contrato de reply do motor (AgentReply -> Evolution). */

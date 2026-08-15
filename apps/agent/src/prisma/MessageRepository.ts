@@ -118,6 +118,8 @@ export interface QuoteSummary {
 }
 
 export interface IMessageRepository {
+  /** Ping de saude do banco (SELECT 1 no PostgreSQL; true no modo memoria). */
+  ping(): Promise<boolean>;
   ensureConversation(whatsappId: string, name?: string | null): Promise<ConversationRecord>;
   getConversationById(id: string): Promise<ConversationRecord | null>;
   getConversationByWhatsapp(whatsappId: string): Promise<ConversationRecord | null>;
@@ -165,6 +167,15 @@ export interface IMessageRepository {
 // ----------------------------------------------------------------------------
 export class PrismaMessageRepository implements IMessageRepository {
   constructor(private readonly prisma: PrismaClient) {}
+
+  async ping(): Promise<boolean> {
+    try {
+      await this.prisma.$queryRaw`SELECT 1`;
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   async ensureConversation(whatsappId: string, name?: string | null): Promise<ConversationRecord> {
     const clean = normalizePhone(whatsappId);
@@ -644,6 +655,10 @@ export class InMemoryMessageRepository implements IMessageRepository {
     direction: string;
     at: string;
   }> = [];
+
+  async ping(): Promise<boolean> {
+    return true;
+  }
   /** Orcamentos vinculados a uma conversa (chave = conversationId). */
   private quotes = new Map<string, QuoteRecord>();
   /** Indice de orcamentos por codigo (inclusive os ainda nao vinculados). */

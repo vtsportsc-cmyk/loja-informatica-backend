@@ -59,7 +59,9 @@ async function startApp(script: ReturnType<typeof fullPurchaseScript> = fullPurc
     evolutionCalls.push(`${init?.method ?? 'GET'} ${url}`);
     const body = url.includes('/notifications/ack')
       ? { received: true, processed: true, orderId: 'ORDER-ACK', status: 'awaiting_nf' }
-      : { key: { remoteJid: `${PHONE}@s.whatsapp.net` } };
+      : url.includes('/instance/connectionState/')
+        ? { instance: { state: 'open' } }
+        : { key: { remoteJid: `${PHONE}@s.whatsapp.net` } };
     return new Response(JSON.stringify(body), {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -316,6 +318,35 @@ describe('Server HTTP - health, webhooks e API do painel (e2e)', () => {
     const text = await res.text();
     expect(text).toContain('llm_calls_total');
     expect(text).toContain('fsm_transitions_total');
+  });
+
+  it('GET /api/system/status exige x-agent-key e reporta a saude do sistema', async () => {
+    const unauth = await fetch(`${app.base}/api/system/status`);
+    expect(unauth.status).toBe(401);
+
+    const res = await fetch(`${app.base}/api/system/status`, {
+      headers: { 'x-agent-key': AGENT_KEY },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      status: {
+        overall: string;
+        process: { uptimeSeconds: number };
+        database: { status: string };
+        redis: { status: string };
+        evolution: { state: string; status: string };
+        llm: { averageResponseMs: number; calls: number };
+      };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.status.overall).toBe('ok');
+    expect(body.status.process.uptimeSeconds).toBeGreaterThanOrEqual(0);
+    expect(body.status.database.status).toBe('ok');
+    expect(body.status.redis.status).toBe('ok');
+    expect(body.status.evolution.state).toBe('open');
+    expect(body.status.evolution.status).toBe('ok');
+    expect(body.status.llm.averageResponseMs).toBeGreaterThanOrEqual(0);
   });
 
   it('retorna 404 para rotas desconhecidas', async () => {

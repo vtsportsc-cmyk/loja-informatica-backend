@@ -4,6 +4,7 @@ import { loadEnv } from './config/env.js';
 import { buildContainer } from './container.js';
 import type { AppContainer } from './container.js';
 import { RedisSessionStore } from './agent/RedisSessionStore.js';
+import { collectSystemStatus } from './routes/health.js';
 
 // Entry HTTP enxuto (sem dependencias de framework) para ambiente serverless.
 // Rotas:
@@ -14,6 +15,7 @@ import { RedisSessionStore } from './agent/RedisSessionStore.js';
 //   POST /webhooks/crm/follow-up       -> reengajamento disparado pelo CRM
 //   POST /api/messages                 -> vendedor envia msg (painel CRM)
 //   GET  /api/agents                   -> lista de atendentes (painel CRM)
+//   GET  /api/system/status            -> saude do sistema (telemetria painel)
 //   GET  /api/conversations            -> lista de conversas do funil (painel)
 //   GET  /api/conversations/:id        -> conversa + historico de mensagens
 //   POST /api/conversations/:id/handoff-> assumir/liberar atendimento (painel)
@@ -188,6 +190,23 @@ async function handle(
     const id = notesMatch[1];
     if (!id) return json(res, 400, { error: 'id ausente' });
     return panelRequest(req, res, container, async (panel, body) => panel.addNote(id, body));
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/system/status') {
+    if (!container.panelApi) {
+      return json(res, 501, { error: 'api do painel nao configurada' });
+    }
+    if (!container.panelApi.checkAuth(req.headers['x-agent-key'] as string | undefined)) {
+      return json(res, 401, { error: 'chave de API invalida' });
+    }
+    const status = await collectSystemStatus({
+      evolution: container.evolution,
+      metrics: container.metrics,
+      repository: container.repository,
+      redis: container.redis,
+      provider: container.router.state,
+    });
+    return json(res, 200, { ok: true, status });
   }
 
   return json(res, 404, { error: 'rota nao encontrada' });

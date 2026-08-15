@@ -95,13 +95,16 @@ async function connectCacheRedis(
   }
 }
 
-function wrapRedisClient(client: Redis): RedisLike & { quit(): Promise<void> } {
+function wrapRedisClient(
+  client: Redis,
+): RedisLike & { ping(): Promise<string>; quit(): Promise<void> } {
   return {
     get: (key) => client.get(key),
     set: (key, value, opts) =>
       opts?.ex ? client.set(key, value, 'EX', opts.ex) : client.set(key, value),
     del: (key) => client.del(key),
     keys: (pattern) => client.keys(pattern),
+    ping: () => client.ping(),
     quit: () => client.quit().then(() => undefined),
   };
 }

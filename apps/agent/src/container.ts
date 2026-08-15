@@ -71,6 +71,8 @@ export interface AppContainer {
   transcription: TranscriptionClient;
   evolutionWebhook?: EvolutionWebhookHandler;
   panelApi?: PanelApi;
+  /** Cliente Redis das sessoes/cache (quando habilitado); undefined = memoria. */
+  redis?: RedisLike & { ping(): Promise<unknown> };
 }
 
 export interface BuildContainerOptions {
@@ -271,6 +273,7 @@ export function buildContainer(options: BuildContainerOptions = {}): AppContaine
     transcription,
     evolutionWebhook,
     panelApi,
+    redis: options.redisClient as (RedisLike & { ping(): Promise<unknown> }) | undefined,
   };
 }
 
