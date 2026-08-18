@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { toast } from 'sonner';
 import { formatBRL } from '@loja/catalog';
-import { FUNNEL_STATUSES, FUNNEL_STATUS_LABELS, FUNNEL_STATUS_PILL } from '@/lib/funnel';
+import { FUNNEL_STATUSES, FUNNEL_STATUS_LABELS } from '@/lib/funnel';
 import { DEPARTMENTS, DEPARTMENT_LABELS, DEPARTMENT_COLORS, isDepartment, type Department } from '@/lib/departments';
 import { LEAD_SOURCES, LEAD_SOURCE_LABELS, LOST_REASONS, LOST_REASON_LABELS, type LeadSource, type LostReason } from '@/lib/leads';
+import { formatPhoneBR } from '@/lib/phone';
 import { SystemHealthBadge } from '@/components/system-health';
 import { CrmKanbanView } from '@/components/crm/CrmKanban';
 import { CrmAnalytics } from '@/components/crm/CrmAnalytics';
@@ -33,30 +34,120 @@ interface DetailResponse {
 
 const MODULES: Array<{ id: ModuleId; label: string; hint: string }> = [
   { id: 'funil', label: 'Funil de Vendas', hint: 'Kanban de leads' },
-  { id: 'atendimento', label: 'Atendimento', hint: 'WhatsApp multi-atendente' },
+  { id: 'atendimento', label: 'Atendimento', hint: 'Workstation 3 colunas' },
   { id: 'pedidos', label: 'Pedidos', hint: 'Orçamentos e emissão' },
   { id: 'bi', label: 'BI', hint: 'Métricas de vendas e conversão' },
 ];
 
+const QUICK_REPLIES = [
+  { label: 'Olá! Como posso ajudar?', text: 'Olá! 👋 Como posso ajudar você hoje?' },
+  { label: 'Aguardando confirmação', text: 'Estou aguardando sua confirmação. Qualquer dúvida, estou à disposição!' },
+  { label: 'Orçamento disponível', text: 'Seu orçamento está pronto! Confira os detalhes e me avise se deseja prosseguir.' },
+  { label: 'PIX gerado', text: 'O PIX foi gerado! Verifique os dados de pagamento no link do orçamento.' },
+  { label: 'Agradecimento', text: 'Obrigado pela preferência! Se precisar de algo mais, é só chamar. 🙌' },
+];
+
+function getInitials(name: string | null, phone: string): string {
+  if (name) {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  const digits = phone.replace(/\D/g, '');
+  return digits.slice(-2).padStart(2, '0');
+}
+
+function statusBadge(c: Conversation): { label: string; cls: string } {
+  if (c.funnelStatus === 'PIX_GERADO') return { label: 'Pagamento Pendente PIX', cls: 'bg-cyan-500/15 text-cyan-300 ring-cyan-500/30' };
+  if (c.humanMode && c.assignedAgentId) return { label: 'Transbordo Humano', cls: 'bg-brand/15 text-brand ring-brand/25' };
+  if (c.humanMode) return { label: 'Humano', cls: 'bg-brand/15 text-brand ring-brand/25' };
+  if (c.funnelStatus === 'ALTA_VALOR') return { label: 'Alto Valor', cls: 'bg-rose-500/15 text-rose-300 ring-rose-500/30' };
+  if (c.funnelStatus === 'CARRINHO') return { label: 'No Carrinho', cls: 'bg-violet-500/15 text-violet-300 ring-violet-500/30' };
+  if (c.funnelStatus === 'MONTANDO_PC') return { label: 'Montando PC', cls: 'bg-blue-500/15 text-blue-300 ring-blue-500/30' };
+  if (c.funnelStatus === 'EM_QUALIFICACAO') return { label: 'Em Qualificação', cls: 'bg-amber-500/15 text-amber-300 ring-amber-500/30' };
+  if (c.unreadCount > 0) return { label: 'Aguardando IA', cls: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30' };
+  return { label: 'IA Ativo', cls: 'bg-sky-500/15 text-sky-300 ring-sky-500/25' };
+}
+
+const AVATAR_COLORS = [
+  'bg-blue-600', 'bg-violet-600', 'bg-emerald-600', 'bg-amber-600',
+  'bg-rose-600', 'bg-cyan-600', 'bg-brand', 'bg-pink-600',
+];
+
+function avatarColor(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = ((hash << 5) - hash + id.charCodeAt(i)) | 0;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
 function SendIcon({ className = '' }: { className?: string }) {
   return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-      className={`shrink-0 ${className}`}
-    >
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 ${className}`}>
       <path d="M22 2L11 13" />
       <path d="M22 2l-7 20-4-9-9-4 20-7z" />
     </svg>
   );
 }
+
+function CopyIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 ${className}`}>
+      <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+    </svg>
+  );
+}
+
+function QrCodeIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 ${className}`}>
+      <rect width="5" height="5" x="3" y="3" rx="1" />
+      <rect width="5" height="5" x="16" y="3" rx="1" />
+      <rect width="5" height="5" x="3" y="16" rx="1" />
+      <path d="M21 16h-3a2 2 0 0 0-2 2v3" />
+      <path d="M21 21v.01" />
+      <path d="M12 7v3a2 2 0 0 1-2 2H7" />
+      <path d="M3 12h.01" />
+      <path d="M12 3h.01" />
+      <path d="M12 16v.01" />
+      <path d="M16 12h1" />
+      <path d="M21 12v.01" />
+      <path d="M12 21v-1" />
+    </svg>
+  );
+}
+
+function BotIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 ${className}`}>
+      <path d="M12 8V4H8" />
+      <rect width="16" height="12" x="4" y="8" rx="2" />
+      <path d="M2 14h2" /><path d="M20 14h2" />
+      <path d="M15 13v2" /><path d="M9 13v2" />
+    </svg>
+  );
+}
+
+function MessageSquareIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 ${className}`}>
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+function TagIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 ${className}`}>
+      <path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z" />
+      <path d="M7 7h.01" />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main Component
+// ---------------------------------------------------------------------------
 
 export default function CrmPage() {
   const [module, setModule] = useState<ModuleId>('funil');
@@ -83,6 +174,8 @@ export default function CrmPage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [sending, setSending] = useState(false);
   const [typing, setTyping] = useState(false);
+  const [showQuickReplies, setShowQuickReplies] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setAgentName(localStorage.getItem('crm-agent-name') ?? '');
@@ -123,6 +216,7 @@ export default function CrmPage() {
 
   const openConversation = useCallback(async (id: string) => {
     setSelectedId(id);
+    setShowQuickReplies(false);
     const res = await fetch(`/api/crm/conversations/${encodeURIComponent(id)}`);
     const body = await res.json();
     if (res.ok) {
@@ -145,6 +239,12 @@ export default function CrmPage() {
     return () => clearInterval(timer);
   }, [autoRefresh, refreshList, selectedId, openConversation]);
 
+  useEffect(() => {
+    if (detail?.messages && detail.messages.length > 0) {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [detail?.messages]);
+
   async function openConversationInChat(id: string) {
     setModule('atendimento');
     await openConversation(id);
@@ -154,6 +254,7 @@ export default function CrmPage() {
     if (!selectedId || !draft.trim()) return;
     setSending(true);
     setTyping(true);
+    setShowQuickReplies(false);
     try {
       const res = await fetch('/api/crm/messages', {
         method: 'POST',
@@ -346,12 +447,12 @@ export default function CrmPage() {
 
   return (
     <div className="flex min-h-0 flex-col gap-3 p-4 lg:h-[calc(100vh-120px)] lg:p-5">
-      {/* Barra superior */}
+      {/* ─── Top Bar ─── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4">
           <div>
             <h1 className="text-lg font-bold tracking-tight text-zinc-50">Painel de Operações</h1>
-            <p className="text-[11px] text-zinc-500">Visão unificada de vendas, atendimento e pedidos</p>
+            <p className="text-[11px] text-zinc-500">Workstation de atendimento multi-atendente</p>
           </div>
           <nav className="flex rounded-lg border border-night-700/70 bg-night-800/40 p-0.5">
             {MODULES.map((m) => (
@@ -378,9 +479,7 @@ export default function CrmPage() {
           >
             <SearchIcon />
             <span>Buscar</span>
-            <kbd className="rounded border border-night-600 bg-night-800 px-1 font-mono text-[9px] text-zinc-500">
-              Ctrl+K
-            </kbd>
+            <kbd className="rounded border border-night-600 bg-night-800 px-1 font-mono text-[9px] text-zinc-500">Ctrl+K</kbd>
           </button>
           <div className="relative">
             <input
@@ -392,17 +491,13 @@ export default function CrmPage() {
                 localStorage.setItem('crm-agent-name', e.target.value);
               }}
             />
-            {agentName && (
-              <span className="pointer-events-none absolute right-2 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-brand" />
-            )}
+            {agentName && <span className="pointer-events-none absolute right-2 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-brand" />}
           </div>
-          <button className="btn-ghost !px-2.5 !py-1.5 !text-xs" onClick={() => void refreshList()}>
-            Atualizar
-          </button>
+          <button className="btn-ghost !px-2.5 !py-1.5 !text-xs" onClick={() => void refreshList()}>Atualizar</button>
           <button
             className={`btn-ghost !px-2.5 !py-1.5 !text-xs ${autoRefresh ? 'text-emerald-400' : 'text-zinc-500'}`}
             onClick={() => setAutoRefresh(!autoRefresh)}
-            title={autoRefresh ? 'Auto-refresh: 15s (clique para desativar)' : 'Auto-refresh desativado'}
+            title={autoRefresh ? 'Auto-refresh: 15s' : 'Auto-refresh desativado'}
           >
             {autoRefresh ? '● AO VIVO' : '○ PAUSADO'}
           </button>
@@ -413,15 +508,11 @@ export default function CrmPage() {
       {error && (
         <div className="flex items-center justify-between gap-2 rounded-lg border border-red-900/60 bg-red-950/50 px-3 py-2 text-xs text-red-300">
           <span>{error}</span>
-          <button
-            className="rounded border border-red-900/60 px-1.5 text-[10px] font-bold uppercase tracking-wider text-red-400 hover:bg-red-900/40"
-            onClick={() => setError(null)}
-          >
-            fechar
-          </button>
+          <button className="rounded border border-red-900/60 px-1.5 text-[10px] font-bold uppercase tracking-wider text-red-400 hover:bg-red-900/40" onClick={() => setError(null)}>fechar</button>
         </div>
       )}
 
+      {/* ─── Content ─── */}
       {loading ? (
         <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[1fr_1fr_1fr]">
           {[1, 2, 3].map((col) => (
@@ -431,12 +522,13 @@ export default function CrmPage() {
                 {[1, 2, 3, 4].map((i) => (
                   <div key={i} className="rounded-lg border border-night-700/50 bg-night-800/40 p-2.5">
                     <div className="flex items-center gap-2">
-                      <div className="skeleton h-2 w-2 shrink-0 rounded-full" />
-                      <div className="skeleton h-3.5 w-28" />
-                      <div className="skeleton ml-auto h-3 w-8" />
+                      <div className="skeleton h-8 w-8 shrink-0 rounded-full" />
+                      <div className="flex-1 space-y-1">
+                        <div className="skeleton h-3.5 w-28" />
+                        <div className="skeleton h-2.5 w-20" />
+                      </div>
+                      <div className="skeleton h-3 w-8" />
                     </div>
-                    <div className="skeleton mt-1.5 h-3 w-36" />
-                    <div className="skeleton mt-1 h-2.5 w-20" />
                   </div>
                 ))}
               </div>
@@ -452,146 +544,144 @@ export default function CrmPage() {
           onOpen={openConversationInChat}
         />
       ) : module === 'atendimento' ? (
-        <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[300px_minmax(0,1fr)_320px]">
-          <div className="surface flex min-h-0 flex-col overflow-hidden !p-0">
-            <div className="border-b border-night-700/70 p-2">
+        /* ═══════════════════════════════════════════════════════════════
+           WORKSTATION 3 COLUNAS
+           ═══════════════════════════════════════════════════════════════ */
+        <div className="grid min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border border-night-700/70 lg:grid-cols-[320px_minmax(0,1fr)_340px]">
+
+          {/* ── COLUNA 1: Conversas & Filtros ── */}
+          <div className="flex min-h-0 flex-col border-r border-night-700/50 bg-night-900/60">
+            {/* Search + Filters */}
+            <div className="border-b border-night-700/50 p-2.5">
               <div className="relative">
                 <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500">
                   <SearchIcon />
                 </span>
                 <input
                   className="input !py-1.5 !pl-8 !text-xs"
-                  placeholder="Buscar conversa ou pedido..."
+                  placeholder="Buscar por nome, telefone ou orçamento..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </div>
-              <div className="mt-1.5 flex items-center gap-1.5">
+              <div className="mt-2 flex items-center gap-1.5">
                 <select
                   className="select !py-1 !text-[11px]"
                   value={departmentFilter}
                   onChange={(e) => setDepartmentFilter(e.target.value)}
-                  title="Filtrar por departamento (fila)"
                 >
-                  <option value="todos">Todos os departamentos</option>
-                  <option value="sem-departamento">Sem departamento</option>
+                  <option value="todos">Todos</option>
+                  <option value="sem-departamento">Sem fila</option>
                   {DEPARTMENTS.map((d) => (
-                    <option key={d} value={d}>
-                      {DEPARTMENT_LABELS[d]}
-                    </option>
+                    <option key={d} value={d}>{DEPARTMENT_LABELS[d]}</option>
                   ))}
                 </select>
                 <span className="tabular ml-auto shrink-0 text-[10px] text-zinc-500">
-                  <span className="font-semibold text-zinc-300">{filtered.length}</span>/
-                  {conversations.length}
+                  <span className="font-semibold text-zinc-300">{filtered.length}</span>/{conversations.length}
                 </span>
               </div>
             </div>
-            <div className="scroll-slim min-h-0 flex-1 space-y-1 overflow-y-auto p-1.5">
+
+            {/* Conversation List */}
+            <div className="scroll-slim min-h-0 flex-1 overflow-y-auto">
               {filtered.length === 0 && (
-                <p className="px-2 py-6 text-center text-xs text-zinc-500">
-                  Nenhuma conversa encontrada.
-                </p>
+                <p className="px-3 py-8 text-center text-xs text-zinc-500">Nenhuma conversa encontrada.</p>
               )}
-              {filtered.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => void openConversation(c.id)}
-                  className={`group w-full rounded-lg border px-2 py-1.5 text-left transition-all ${
-                    selectedId === c.id
-                      ? 'border-night-500 bg-night-800'
-                      : 'border-transparent hover:bg-night-800/70'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot(c.funnelStatus)}`} />
-                      <span className="truncate text-xs font-semibold text-zinc-100">
-                        {c.customerName || c.whatsappId}
-                      </span>
-                    </span>
-                    <span className="flex shrink-0 items-center gap-1">
+              {filtered.map((c) => {
+                const badge = statusBadge(c);
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => void openConversation(c.id)}
+                    className={`group flex w-full items-start gap-2.5 border-b border-night-800/50 px-3 py-2.5 text-left transition-all ${
+                      selectedId === c.id
+                        ? 'border-l-2 border-l-brand bg-night-800/60'
+                        : 'border-l-2 border-l-transparent hover:bg-night-800/30'
+                    }`}
+                  >
+                    {/* Avatar */}
+                    <div className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white ${avatarColor(c.id)}`}>
+                      {getInitials(c.customerName, c.whatsappId)}
                       {c.unreadCount > 0 && (
-                        <span className="tabular rounded-full bg-red-500 px-1.5 py-px text-[9px] font-bold text-white">
+                        <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[8px] font-bold text-white">
                           {c.unreadCount}
                         </span>
                       )}
-                      <span className="tabular text-[10px] text-zinc-500">
-                        {fmtTime(c.lastMessageAt)}
-                      </span>
-                    </span>
-                  </div>
-                  <div className="mt-0.5 flex items-center gap-1 pl-3 text-[10px]">
-                    <span className="truncate text-zinc-500">{c.whatsappId}</span>
-                    {c.department && (
-                      <span className="chip text-zinc-500">
-                        {DEPARTMENT_LABELS[c.department as Department] ?? c.department}
-                      </span>
-                    )}
-                    {c.quote && (
-                      <span className="ml-auto shrink-0 font-mono text-zinc-600">{c.quote.code}</span>
-                    )}
-                  </div>
-                  <div className="mt-1 flex items-center gap-1 pl-3 text-[10px]">
-                    <span
-                      className={`inline-flex items-center rounded-md px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider ring-1 ring-inset ${
-                        c.humanMode
-                          ? 'bg-brand/10 text-brand ring-brand/25'
-                          : 'bg-sky-500/10 text-sky-300 ring-sky-500/25'
-                      }`}
-                    >
-                      {c.humanMode ? `humano${c.assignedAgentId ? `:${c.assignedAgentId}` : ''}` : 'IA'}
-                    </span>
-                    {c.funnelStatus === 'ALTA_VALOR' && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 px-1.5 text-[9px] font-bold uppercase tracking-wider text-rose-300 ring-1 ring-inset ring-rose-500/30">
-                        <SparkIcon /> alto valor
-                      </span>
-                    )}
-                  </div>
-                </button>
-              ))}
+                    </div>
+                    {/* Content */}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className="truncate text-xs font-semibold text-zinc-100">
+                          {c.customerName || 'Sem nome'}
+                        </span>
+                        <span className="tabular shrink-0 text-[10px] text-zinc-500">{fmtTime(c.lastMessageAt)}</span>
+                      </div>
+                      <p className="mt-0.5 truncate text-[10px] text-zinc-500">
+                        {formatPhoneBR(c.whatsappId)}
+                      </p>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                        <span className={`inline-flex items-center rounded-full px-1.5 py-px text-[8px] font-bold uppercase tracking-wider ring-1 ring-inset ${badge.cls}`}>
+                          {badge.label}
+                        </span>
+                        {c.department && (
+                          <span className="chip !py-px !text-[8px]">{DEPARTMENT_LABELS[c.department as Department] ?? c.department}</span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          <div className="surface flex min-h-0 flex-col overflow-hidden !p-0">
+          {/* ── COLUNA 2: Chat Ativo & Ações Rápidas ── */}
+          <div className="flex min-h-0 flex-col bg-night-950/30">
             {!selected ? (
-              <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">
-                Selecione uma conversa à esquerda.
+              <div className="flex flex-1 flex-col items-center justify-center gap-3 text-zinc-500">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-night-700/50 bg-night-800/30">
+                  <MessageSquareIcon className="h-7 w-7 text-zinc-600" />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-medium text-zinc-400">Nenhuma conversa selecionada</p>
+                  <p className="mt-1 text-xs text-zinc-600">Selecione uma conversa na coluna ao lado para iniciar o atendimento.</p>
+                </div>
               </div>
             ) : (
               <>
-                <div className="flex items-center justify-between gap-2 border-b border-night-700/70 bg-night-900/80 px-3 py-2 backdrop-blur">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h2 className="truncate text-sm font-semibold text-zinc-100">
-                        {selected.customerName || selected.whatsappId}
-                      </h2>
-                      <span
-                        className={`inline-flex items-center rounded-md px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider ring-1 ring-inset ${
-                          selected.humanMode
-                            ? 'bg-brand/10 text-brand ring-brand/25'
-                            : 'bg-sky-500/10 text-sky-300 ring-sky-500/25'
-                        }`}
-                      >
-                        {selected.humanMode ? 'humano' : 'IA'}
-                      </span>
+                {/* Chat Header */}
+                <div className="flex items-center justify-between gap-2 border-b border-night-700/50 bg-night-900/80 px-4 py-2.5 backdrop-blur">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${avatarColor(selected.id)}`}>
+                      {getInitials(selected.customerName, selected.whatsappId)}
                     </div>
-                    <p className="truncate text-[10px] text-zinc-500">
-                      {selected.whatsappId} · atualizado {fmtDate(selected.lastMessageAt)}
-                    </p>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h2 className="truncate text-sm font-semibold text-zinc-100">
+                          {selected.customerName || 'Sem nome'}
+                        </h2>
+                        <span className={`inline-flex items-center rounded-full px-1.5 py-px text-[8px] font-bold uppercase tracking-wider ring-1 ring-inset ${statusBadge(selected).cls}`}>
+                          {statusBadge(selected).label}
+                        </span>
+                      </div>
+                      <p className="truncate text-[10px] text-zinc-500">
+                        {formatPhoneBR(selected.whatsappId)} · {fmtDate(selected.lastMessageAt)}
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex shrink-0 items-center gap-1.5">
                     {selected.humanMode ? (
                       <button
-                        className="btn-ghost !px-2 !py-1 !text-[11px]"
+                        className="btn-ghost !px-2.5 !py-1 !text-[11px]"
                         onClick={() => void handoff('release')}
+                        title="Liberar para a IA"
                       >
-                        Liberar para a IA
+                        <BotIcon /> Liberar p/ IA
                       </button>
                     ) : (
                       <button
-                        className="btn-primary !px-2 !py-1 !text-[11px]"
+                        className="btn-primary !px-2.5 !py-1 !text-[11px]"
                         onClick={() => void handoff('assume')}
+                        title="Assumir atendimento"
                       >
                         Assumir (humano)
                       </button>
@@ -599,9 +689,15 @@ export default function CrmPage() {
                   </div>
                 </div>
 
-                <div className="scroll-slim min-h-0 flex-1 space-y-2 overflow-y-auto bg-night-950/50 p-3">
+                {/* Messages */}
+                <div className="scroll-slim min-h-0 flex-1 space-y-2 overflow-y-auto p-4">
                   {detail?.messages.length === 0 && (
-                    <p className="py-10 text-center text-xs text-zinc-500">Sem mensagens ainda.</p>
+                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-night-700/50 bg-night-800/30">
+                        <MessageSquareIcon className="h-5 w-5 text-zinc-600" />
+                      </div>
+                      <p className="mt-3 text-xs text-zinc-500">Sem mensagens ainda.</p>
+                    </div>
                   )}
                   {detail?.messages.map((m) => (
                     <div
@@ -609,27 +705,80 @@ export default function CrmPage() {
                       className={`flex ${m.direction === 'inbound' ? 'justify-start' : 'justify-end'}`}
                     >
                       <div
-                        className={`max-w-[75%] rounded-xl px-3 py-1.5 text-xs shadow-card ${
+                        className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-xs shadow-sm ${
                           m.direction === 'inbound'
-                            ? 'rounded-tl-sm border border-night-700/70 bg-night-800/80 text-zinc-100'
-                            : 'rounded-tr-sm border border-brand/25 bg-brand/15 text-zinc-50'
+                            ? 'rounded-tl-md border border-night-700/70 bg-night-800/80 text-zinc-100'
+                            : 'rounded-tr-md border border-brand/20 bg-brand/10 text-zinc-50'
                         }`}
                       >
-                        <p className="whitespace-pre-wrap">{m.text}</p>
-                        <p
-                          className={`mt-0.5 text-[9px] ${
-                            m.direction === 'inbound' ? 'text-zinc-500' : 'text-brand/70'
-                          }`}
-                        >
+                        <p className="whitespace-pre-wrap leading-relaxed">{m.text}</p>
+                        <p className={`mt-1 text-[9px] ${m.direction === 'inbound' ? 'text-zinc-500' : 'text-brand/60'}`}>
                           {m.direction === 'inbound' ? 'cliente' : m.agentId ? m.agentId : 'IA'} ·{' '}
                           {fmtTime(m.createdAt)}
                         </p>
                       </div>
                     </div>
                   ))}
+                  <div ref={chatEndRef} />
                 </div>
 
-                <div className="border-t border-night-700/70 bg-night-900/80 p-3 backdrop-blur">
+                {/* Quick Actions Bar */}
+                {selected && (
+                  <div className="border-t border-night-700/50 bg-night-900/60 px-4 py-2">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        className="btn-ghost !px-2 !py-1 !text-[10px]"
+                        title="Enviar link do orçamento"
+                        onClick={() => {
+                          if (selected.quote) {
+                            const url = `${window.location.origin}/quote/${selected.quote.code}`;
+                            navigator.clipboard.writeText(url).then(
+                              () => toast.success('Link copiado!', { description: url }),
+                              () => toast.error('Falha ao copiar'),
+                            );
+                          } else {
+                            toast.info('Conversa sem orçamento vinculado');
+                          }
+                        }}
+                      >
+                        <CopyIcon /> Orçamento
+                      </button>
+                      <button
+                        className="btn-ghost !px-2 !py-1 !text-[10px]"
+                        title="Alternar Robô / Humano"
+                        onClick={() => void handoff(selected.humanMode ? 'release' : 'assume')}
+                      >
+                        <BotIcon /> {selected.humanMode ? 'Liberar IA' : 'Assumir'}
+                      </button>
+                      <button
+                        className={`btn-ghost !px-2 !py-1 !text-[10px] ${showQuickReplies ? 'border-brand/40 text-brand' : ''}`}
+                        title="Respostas rápidas"
+                        onClick={() => setShowQuickReplies(!showQuickReplies)}
+                      >
+                        <TagIcon /> Templates
+                      </button>
+                    </div>
+                    {showQuickReplies && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {QUICK_REPLIES.map((qr, i) => (
+                          <button
+                            key={i}
+                            className="rounded-md border border-night-600 bg-night-800/60 px-2 py-1 text-[10px] text-zinc-300 transition-colors hover:border-night-500 hover:bg-night-800 hover:text-white"
+                            onClick={() => {
+                              setDraft(qr.text);
+                              setShowQuickReplies(false);
+                            }}
+                          >
+                            {qr.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Input */}
+                <div className="border-t border-night-700/50 bg-night-900/80 p-3 backdrop-blur">
                   {typing && (
                     <div className="mb-2 flex items-center gap-1.5 text-[11px] text-zinc-500">
                       <span className="flex gap-0.5">
@@ -643,7 +792,7 @@ export default function CrmPage() {
                   <div className="flex gap-2">
                     <input
                       className="input !py-1.5 !text-xs"
-                      placeholder="Mensagem para o cliente..."
+                      placeholder="Digite sua mensagem..."
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
                       onKeyDown={(e) => {
@@ -664,169 +813,130 @@ export default function CrmPage() {
             )}
           </div>
 
-          <div className="surface flex min-h-0 flex-col overflow-hidden !p-0">
+          {/* ── COLUNA 3: Ficha do Lead / Contexto ── */}
+          <div className="flex min-h-0 flex-col border-l border-night-700/50 bg-night-900/60">
             {!selected ? (
-              <p className="p-4 text-xs text-zinc-500">Contexto do cliente aparecerá aqui.</p>
+              <div className="flex flex-1 items-center justify-center p-4 text-center text-xs text-zinc-500">
+                Selecione uma conversa para ver os dados do lead.
+              </div>
             ) : (
               <>
-                <div className="flex gap-0.5 border-b border-night-700/70 bg-night-900/80 p-1.5 backdrop-blur">
+                {/* Client Card Header */}
+                <div className="border-b border-night-700/50 p-4">
+                  <div className="flex items-center gap-3">
+                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white ${avatarColor(selected.id)}`}>
+                      {getInitials(selected.customerName, selected.whatsappId)}
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="truncate text-sm font-bold text-zinc-50">
+                        {selected.customerName || 'Sem nome'}
+                      </h3>
+                      <p className="text-[11px] text-zinc-500">{formatPhoneBR(selected.whatsappId)}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tabs */}
+                <div className="flex gap-0.5 border-b border-night-700/50 bg-night-900/40 p-1.5">
                   <button
                     onClick={() => setSidebarTab('resumo')}
-                    className={`flex-1 rounded-md px-3 py-1 text-[11px] font-semibold transition-all ${
-                      sidebarTab === 'resumo'
-                        ? 'bg-night-700 text-white shadow-sm'
-                        : 'text-zinc-400 hover:text-zinc-100'
+                    className={`flex-1 rounded-md px-2 py-1 text-[11px] font-semibold transition-all ${
+                      sidebarTab === 'resumo' ? 'bg-night-700 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-100'
                     }`}
                   >
-                    Resumo
+                    Ficha
                   </button>
                   <button
                     onClick={() => setSidebarTab('anotacoes')}
-                    className={`flex-1 rounded-md px-3 py-1 text-[11px] font-semibold transition-all ${
-                      sidebarTab === 'anotacoes'
-                        ? 'bg-night-700 text-white shadow-sm'
-                        : 'text-zinc-400 hover:text-zinc-100'
+                    className={`flex-1 rounded-md px-2 py-1 text-[11px] font-semibold transition-all ${
+                      sidebarTab === 'anotacoes' ? 'bg-night-700 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-100'
                     }`}
                   >
                     Anotações
                     {detail && detail.notes.length > 0 && (
-                      <span className="tabular ml-1 rounded bg-night-800 px-1 text-[9px] text-zinc-400">
-                        {detail.notes.length}
-                      </span>
+                      <span className="tabular ml-1 rounded bg-night-800 px-1 text-[9px] text-zinc-400">{detail.notes.length}</span>
                     )}
                   </button>
                 </div>
+
                 {sidebarTab === 'resumo' ? (
-                  <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
-                <div>
-                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-                    Atribuição
-                  </h3>
-                  <div className="mt-1.5 space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <select
-                        className="select !py-1.5 !text-xs"
-                        value={departmentDraft}
-                        onChange={(e) => setDepartmentDraft(e.target.value)}
-                        title="Fila/departamento"
-                      >
-                        <option value="none">Sem departamento</option>
-                        {DEPARTMENTS.map((d) => (
-                          <option key={d} value={d}>
-                            {DEPARTMENT_LABELS[d]}
-                          </option>
-                        ))}
-                      </select>
-                      <span
-                        className={`h-2 w-2 shrink-0 rounded-full ${
-                          departmentDraft !== 'none' && isDepartment(departmentDraft)
-                            ? DEPARTMENT_COLORS[departmentDraft as Department]
-                            : 'bg-zinc-500'
-                        }`}
-                      />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <select
-                        className="select !py-1.5 !text-xs"
-                        value={agentDraft}
-                        onChange={(e) => setAgentDraft(e.target.value)}
-                        title="Atendente responsável"
-                      >
-                        <option value="none">Nenhum atendente</option>
-                        {agents.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.name}
-                            {a.role ? ` · ${a.role}` : ''}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        className="btn-ghost shrink-0 !px-2 !py-1 !text-[11px]"
-                        onClick={() => void saveDepartment()}
-                      >
-                        Salvar
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                  <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+                    {/* Status do Funil */}
+                    <Section title="Status do Funil">
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <select
+                          className="select !py-1.5 !text-xs"
+                          value={statusDraft}
+                          onChange={(e) => setStatusDraft(e.target.value)}
+                        >
+                          {FUNNEL_STATUSES.map((s) => (
+                            <option key={s} value={s}>{FUNNEL_STATUS_LABELS[s]}</option>
+                          ))}
+                        </select>
+                        <button className="btn-ghost shrink-0 !px-2 !py-1 !text-[11px]" onClick={() => void changeStatus()}>Salvar</button>
+                      </div>
+                      {selected.funnelStatus === 'CANCELADO' && (
+                        <p className="mt-1.5 rounded bg-red-950/60 px-2 py-1 text-[10px] text-red-300">
+                          Perdido{selected.lostReason ? ` — ${LOST_REASON_LABELS[selected.lostReason as LostReason] ?? selected.lostReason}` : ''}
+                          {selected.lostAt ? ` · ${fmtDate(selected.lostAt)}` : ''}
+                        </p>
+                      )}
+                    </Section>
 
-                <div>
-                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-                    Origem do lead
-                  </h3>
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <select
-                      className="select !py-1.5 !text-xs"
-                      value={leadSourceDraft}
-                      onChange={(e) => setLeadSourceDraft(e.target.value)}
-                      title="Origem do lead"
-                    >
-                      <option value="none">Sem origem</option>
-                      {LEAD_SOURCES.map((s) => (
-                        <option key={s} value={s}>
-                          {LEAD_SOURCE_LABELS[s]}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      className="btn-ghost !px-2 !py-1 !text-[11px]"
-                      onClick={() => void saveLeadSource()}
-                    >
-                      Salvar
-                    </button>
-                  </div>
-                </div>
+                    {/* Atribuição */}
+                    <Section title="Atribuição">
+                      <div className="mt-1.5 space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <select className="select !py-1.5 !text-xs" value={departmentDraft} onChange={(e) => setDepartmentDraft(e.target.value)}>
+                            <option value="none">Sem departamento</option>
+                            {DEPARTMENTS.map((d) => (
+                              <option key={d} value={d}>{DEPARTMENT_LABELS[d]}</option>
+                            ))}
+                          </select>
+                          <span className={`h-2 w-2 shrink-0 rounded-full ${departmentDraft !== 'none' && isDepartment(departmentDraft) ? DEPARTMENT_COLORS[departmentDraft as Department] : 'bg-zinc-500'}`} />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <select className="select !py-1.5 !text-xs" value={agentDraft} onChange={(e) => setAgentDraft(e.target.value)}>
+                            <option value="none">Nenhum atendente</option>
+                            {agents.map((a) => (
+                              <option key={a.id} value={a.id}>{a.name}{a.role ? ` · ${a.role}` : ''}</option>
+                            ))}
+                          </select>
+                          <button className="btn-ghost shrink-0 !px-2 !py-1 !text-[11px]" onClick={() => void saveDepartment()}>Salvar</button>
+                        </div>
+                      </div>
+                    </Section>
 
-                <div>
-                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-                    Funil
-                  </h3>
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <select
-                      className="select !py-1.5 !text-xs"
-                      value={statusDraft}
-                      onChange={(e) => setStatusDraft(e.target.value)}
-                    >
-                      {FUNNEL_STATUSES.map((s) => (
-                        <option key={s} value={s}>
-                          {FUNNEL_STATUS_LABELS[s]}
-                        </option>
-                      ))}
-                    </select>
-                    <button className="btn-ghost !px-2 !py-1 !text-[11px]" onClick={() => void changeStatus()}>
-                      Salvar
-                    </button>
-                  </div>
-                  {selected.funnelStatus === 'CANCELADO' && (
-                    <p className="mt-1.5 rounded bg-red-950/60 px-2 py-1 text-[10px] text-red-300">
-                      Pedido perdido
-                      {selected.lostReason
-                        ? ` — ${LOST_REASON_LABELS[selected.lostReason as LostReason] ?? selected.lostReason}`
-                        : ''}
-                      {selected.lostAt ? ` · ${fmtDate(selected.lostAt)}` : ''}
-                    </p>
-                  )}
-                </div>
+                    {/* Origem do Lead */}
+                    <Section title="Origem do Lead">
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <select className="select !py-1.5 !text-xs" value={leadSourceDraft} onChange={(e) => setLeadSourceDraft(e.target.value)}>
+                          <option value="none">Sem origem</option>
+                          {LEAD_SOURCES.map((s) => (
+                            <option key={s} value={s}>{LEAD_SOURCE_LABELS[s]}</option>
+                          ))}
+                        </select>
+                        <button className="btn-ghost !px-2 !py-1 !text-[11px]" onClick={() => void saveLeadSource()}>Salvar</button>
+                      </div>
+                    </Section>
 
-                <div>
-                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-                    Pedido
-                  </h3>
-                  {selected.quote ? (
-                    <OrderSummary quote={selected.quote} status={selected.funnelStatus} onEmit={() => void emitOrder(selected.id)} />
-                  ) : (
-                    <p className="mt-1.5 text-xs text-zinc-500">
-                      Nenhum orçamento do Monte seu PC vinculado a esta conversa.
-                    </p>
-                  )}
-                </div>
+                    {/* Orçamento / Carrinho */}
+                    <Section title="Orçamento">
+                      {selected.quote ? (
+                        <WorkstationOrderSummary
+                          quote={selected.quote}
+                          status={selected.funnelStatus}
+                          onEmit={() => void emitOrder(selected.id)}
+                        />
+                      ) : (
+                        <p className="mt-1.5 text-xs text-zinc-500">Nenhum orçamento vinculado.</p>
+                      )}
+                    </Section>
 
-                <div>
-                  <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-                    Timeline
-                  </h3>
-                  <Timeline events={detail?.timeline ?? []} />
-                </div>
+                    {/* Timeline */}
+                    <Section title="Timeline">
+                      <Timeline events={detail?.timeline ?? []} />
+                    </Section>
                   </div>
                 ) : (
                   <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -854,6 +964,7 @@ export default function CrmPage() {
         />
       )}
 
+      {/* Modals */}
       {pendingLostId && (
         <LostReasonModal
           customerName={selected?.customerName ?? null}
@@ -881,15 +992,24 @@ export default function CrmPage() {
   );
 }
 
-function SparkIcon({ className = '' }: { className?: string }) {
+// ---------------------------------------------------------------------------
+// Section wrapper
+// ---------------------------------------------------------------------------
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden className={`shrink-0 ${className}`}>
-      <path d="M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9L12 2z" />
-    </svg>
+    <div>
+      <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">{title}</h3>
+      {children}
+    </div>
   );
 }
 
-function OrderSummary({
+// ---------------------------------------------------------------------------
+// WorkstationOrderSummary (compact version for Col 3)
+// ---------------------------------------------------------------------------
+
+function WorkstationOrderSummary({
   quote,
   status,
   onEmit,
@@ -900,32 +1020,32 @@ function OrderSummary({
 }) {
   const emitted = Boolean(quote.blingNumber);
   return (
-    <div className="mt-1.5 space-y-2 rounded-lg border border-night-700/70 bg-night-800/50 p-2">
+    <div className="mt-1.5 space-y-2 rounded-lg border border-night-700/70 bg-night-800/50 p-2.5">
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-xs font-bold text-brand">{quote.code}</span>
         <span className="tabular text-[10px] text-zinc-500">{quote.items.length} itens</span>
       </div>
+
+      {/* Items */}
       <ul className="space-y-1 text-[11px] text-zinc-300">
-        {quote.items.slice(0, 6).map((item, i) => (
+        {quote.items.slice(0, 5).map((item, i) => (
           <li key={i} className="flex justify-between gap-2">
-            <span className="truncate">
-              {item.quantity}x {item.name}
-            </span>
-            <span className="tabular shrink-0 text-zinc-400">
-              {formatBRL(item.unitPriceCents * item.quantity)}
-            </span>
+            <span className="truncate">{item.quantity}x {item.name}</span>
+            <span className="tabular shrink-0 text-zinc-400">{formatBRL(item.unitPriceCents * item.quantity)}</span>
           </li>
         ))}
-        {quote.items.length > 6 && (
-          <li className="text-[10px] text-zinc-500">+ {quote.items.length - 6} itens...</li>
+        {quote.items.length > 5 && (
+          <li className="text-[10px] text-zinc-500">+ {quote.items.length - 5} itens...</li>
         )}
       </ul>
+
+      {/* Totals */}
       <dl className="divider space-y-0.5 pt-1.5 text-[11px]">
         <div className="flex justify-between">
           <dt className="text-zinc-500">Subtotal</dt>
           <dd className="tabular text-zinc-300">{formatBRL(quote.totalCents)}</dd>
         </div>
-        <div className="flex justify-between text-brand">
+        <div className="flex justify-between font-semibold text-brand">
           <dt>PIX</dt>
           <dd className="tabular">{formatBRL(quote.pixTotalCents)}</dd>
         </div>
@@ -934,14 +1054,41 @@ function OrderSummary({
           <dd className="tabular">{formatBRL(quote.monthlyValueCents)}</dd>
         </div>
       </dl>
+
+      {/* Actions */}
+      <div className="flex gap-1.5 pt-1">
+        <button
+          className="btn-ghost flex-1 !px-2 !py-1 !text-[10px]"
+          onClick={() => {
+            const url = `${window.location.origin}/quote/${quote.code}`;
+            navigator.clipboard.writeText(url).then(
+              () => toast.success('Link copiado!', { description: url }),
+              () => toast.error('Falha ao copiar link'),
+            );
+          }}
+        >
+          <CopyIcon /> Copiar link
+        </button>
+        <button
+          className="btn-ghost flex-1 !px-2 !py-1 !text-[10px]"
+          onClick={() => {
+            toast.info('Cobrança PIX', {
+              description: `PIX de ${formatBRL(quote.pixTotalCents)} — código: ${quote.code}`,
+            });
+          }}
+        >
+          <QrCodeIcon /> Cobrar PIX
+        </button>
+      </div>
+
+      {/* Bling Status */}
       {emitted ? (
         <p className="rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-300 ring-1 ring-inset ring-emerald-500/25">
-          Pedido Bling #{quote.blingNumber}
-          {quote.blingStatus ? ` · ${quote.blingStatus}` : ''} — emissão/expedição iniciada.
+          Pedido Bling #{quote.blingNumber}{quote.blingStatus ? ` · ${quote.blingStatus}` : ''}
         </p>
       ) : status === 'AGUARDANDO_NF' ? (
         <p className="rounded-md bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300 ring-1 ring-inset ring-amber-500/25">
-          Aguardando emissão da NF (Bling).
+          Aguardando emissão NF
         </p>
       ) : (
         <button className="btn-primary w-full !px-2 !py-1.5 !text-[11px]" onClick={onEmit}>
@@ -951,6 +1098,10 @@ function OrderSummary({
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// OrdersTable
+// ---------------------------------------------------------------------------
 
 function OrdersTable({
   orders,
@@ -992,17 +1143,14 @@ function OrdersTable({
             {orders.length === 0 && (
               <tr>
                 <td colSpan={10} className="px-3 py-10 text-center text-zinc-500">
-                  Nenhum pedido vinculado ainda. Os orçamentos confirmados pelo WhatsApp aparecem aqui.
+                  Nenhum pedido vinculado ainda.
                 </td>
               </tr>
             )}
             {orders.map((c) => {
               const q = c.quote!;
               return (
-                <tr
-                  key={c.id}
-                  className="border-b border-night-800/70 transition-colors hover:bg-night-800/40"
-                >
+                <tr key={c.id} className="border-b border-night-800/70 transition-colors hover:bg-night-800/40">
                   <td className="px-3 py-2 font-mono font-semibold text-brand">{q.code}</td>
                   <td className="px-3 py-2">
                     <span className="font-medium text-zinc-100">{c.customerName || c.whatsappId}</span>
@@ -1010,37 +1158,25 @@ function OrdersTable({
                   </td>
                   <td className="px-3 py-2">
                     {q.utmSource ? (
-                      <span className="inline-flex items-center rounded-md bg-brand/10 px-1.5 py-0.5 font-mono text-[10px] text-brand ring-1 ring-inset ring-brand/25">
-                        {q.utmSource}
-                      </span>
+                      <span className="inline-flex items-center rounded-md bg-brand/10 px-1.5 py-0.5 font-mono text-[10px] text-brand ring-1 ring-inset ring-brand/25">{q.utmSource}</span>
                     ) : c.leadSource ? (
-                      <span className="inline-flex items-center rounded-md bg-night-800 px-1.5 py-0.5 text-[10px] text-zinc-400 ring-1 ring-inset ring-night-600">
-                        {LEAD_SOURCE_LABELS[c.leadSource as LeadSource] ?? c.leadSource}
-                      </span>
+                      <span className="inline-flex items-center rounded-md bg-night-800 px-1.5 py-0.5 text-[10px] text-zinc-400 ring-1 ring-inset ring-night-600">{LEAD_SOURCE_LABELS[c.leadSource as LeadSource] ?? c.leadSource}</span>
                     ) : (
                       <span className="text-zinc-600">—</span>
                     )}
                   </td>
                   <td className="tabular px-3 py-2 text-zinc-400">{fmtDate(c.lastMessageAt)}</td>
                   <td className="tabular px-3 py-2 text-right text-zinc-300">{q.items.length}</td>
-                  <td className="tabular px-3 py-2 text-right font-semibold text-brand">
-                    {formatBRL(q.pixTotalCents)}
-                  </td>
-                  <td className="tabular px-3 py-2 text-right text-zinc-400">
-                    {q.installments}x de {formatBRL(q.monthlyValueCents)}
-                  </td>
+                  <td className="tabular px-3 py-2 text-right font-semibold text-brand">{formatBRL(q.pixTotalCents)}</td>
+                  <td className="tabular px-3 py-2 text-right text-zinc-400">{q.installments}x de {formatBRL(q.monthlyValueCents)}</td>
                   <td className="px-3 py-2">
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${statusPill(c.funnelStatus)}`}
-                    >
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${statusPill(c.funnelStatus)}`}>
                       {FUNNEL_STATUS_LABELS[c.funnelStatus as keyof typeof FUNNEL_STATUS_LABELS] ?? c.funnelStatus}
                     </span>
                   </td>
                   <td className="tabular px-3 py-2 text-zinc-400">
                     {q.blingNumber ? (
-                      <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] text-emerald-300 ring-1 ring-inset ring-emerald-500/25">
-                        #{q.blingNumber}
-                      </span>
+                      <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] text-emerald-300 ring-1 ring-inset ring-emerald-500/25">#{q.blingNumber}</span>
                     ) : q.blingStatus ? (
                       <span className="text-zinc-500">{q.blingStatus}</span>
                     ) : (
@@ -1049,13 +1185,9 @@ function OrdersTable({
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex justify-end gap-1">
-                      <button className="btn-ghost !px-2 !py-1 !text-[10px]" onClick={() => onOpen(c.id)}>
-                        Conversa
-                      </button>
+                      <button className="btn-ghost !px-2 !py-1 !text-[10px]" onClick={() => onOpen(c.id)}>Conversa</button>
                       {!q.blingNumber && c.funnelStatus !== 'AGUARDANDO_NF' && (
-                        <button className="btn-primary !px-2 !py-1 !text-[10px]" onClick={() => onEmit(c.id)}>
-                          Emitir
-                        </button>
+                        <button className="btn-primary !px-2 !py-1 !text-[10px]" onClick={() => onEmit(c.id)}>Emitir</button>
                       )}
                     </div>
                   </td>
@@ -1069,6 +1201,10 @@ function OrdersTable({
   );
 }
 
+// ---------------------------------------------------------------------------
+// StatCard
+// ---------------------------------------------------------------------------
+
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="surface">
@@ -1077,6 +1213,10 @@ function StatCard({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Timeline
+// ---------------------------------------------------------------------------
 
 const TIMELINE_TYPE_META: Record<string, { label: string; color: string }> = {
   CONVERSATION_CREATED: { label: 'Conversa', color: 'bg-zinc-500' },
@@ -1090,11 +1230,7 @@ const TIMELINE_TYPE_META: Record<string, { label: string; color: string }> = {
 
 function Timeline({ events }: { events: TimelineEvent[] }) {
   if (events.length === 0) {
-    return (
-      <p className="mt-1.5 text-xs text-zinc-500">
-        Sem atividades registradas nesta conversa ainda.
-      </p>
-    );
+    return <p className="mt-1.5 text-xs text-zinc-500">Sem atividades nesta conversa.</p>;
   }
   return (
     <ol className="mt-1.5 space-y-3">
@@ -1103,19 +1239,11 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
         const isLast = i === events.length - 1;
         return (
           <li key={ev.id} className="relative flex gap-2.5 pl-4">
-            <span
-              className={`absolute left-[3px] top-2.5 w-px bg-night-700/70 ${isLast ? 'h-0' : 'h-full'}`}
-              aria-hidden
-            />
-            <span
-              className={`absolute left-0 top-1 h-[7px] w-[7px] rounded-full ring-2 ring-night-900 ${meta.color}`}
-              aria-hidden
-            />
+            <span className={`absolute left-[3px] top-2.5 w-px bg-night-700/70 ${isLast ? 'h-0' : 'h-full'}`} aria-hidden />
+            <span className={`absolute left-0 top-1 h-[7px] w-[7px] rounded-full ring-2 ring-night-900 ${meta.color}`} aria-hidden />
             <div className="min-w-0 flex-1">
               <p className="text-[11px] font-semibold leading-tight text-zinc-200">{ev.title}</p>
-              {ev.detail && (
-                <p className="mt-0.5 text-[10px] leading-snug text-zinc-400">{ev.detail}</p>
-              )}
+              {ev.detail && <p className="mt-0.5 text-[10px] leading-snug text-zinc-400">{ev.detail}</p>}
               <p className="mt-1 text-[9px] text-zinc-500">
                 <span className="chip text-zinc-500">{meta.label}</span>{' '}
                 <span className="tabular">{fmtDate(ev.createdAt)}</span>
@@ -1127,6 +1255,10 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
     </ol>
   );
 }
+
+// ---------------------------------------------------------------------------
+// LostReasonModal
+// ---------------------------------------------------------------------------
 
 function LostReasonModal({
   customerName,
@@ -1148,22 +1280,12 @@ function LostReasonModal({
           <div>
             <h3 className="text-sm font-semibold text-zinc-50">Marcar como perdido</h3>
             <p className="mt-1 text-xs text-zinc-400">
-              A conversa de <span className="font-semibold text-zinc-200">{customerName ?? '—'}</span>{' '}
-              será movida para{' '}
-              <span className="font-semibold text-red-300">Cancelado / Perdido</span>.
+              A conversa de <span className="font-semibold text-zinc-200">{customerName ?? '—'}</span> será movida para <span className="font-semibold text-red-300">Cancelado / Perdido</span>.
             </p>
           </div>
-          <button
-            className="rounded-md border border-night-700 px-1.5 text-[11px] text-zinc-500 transition-colors hover:border-night-500 hover:text-zinc-200"
-            onClick={onCancel}
-            aria-label="Fechar"
-          >
-            ✕
-          </button>
+          <button className="rounded-md border border-night-700 px-1.5 text-[11px] text-zinc-500 transition-colors hover:border-night-500 hover:text-zinc-200" onClick={onCancel} aria-label="Fechar">✕</button>
         </div>
-        <p className="mt-4 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-          Motivo da perda
-        </p>
+        <p className="mt-4 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Motivo da perda</p>
         <div className="mt-1.5 space-y-1.5">
           {LOST_REASONS.map((r) => (
             <label
@@ -1174,29 +1296,23 @@ function LostReasonModal({
                   : 'border-night-700 bg-night-800/50 text-zinc-300 hover:border-night-500'
               }`}
             >
-              <input
-                type="radio"
-                name="lost-reason"
-                className="accent-red-500"
-                checked={value === r}
-                onChange={() => onChange(r)}
-              />
+              <input type="radio" name="lost-reason" className="accent-red-500" checked={value === r} onChange={() => onChange(r)} />
               {LOST_REASON_LABELS[r]}
             </label>
           ))}
         </div>
         <div className="mt-4 flex justify-end gap-2">
-          <button className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={onCancel}>
-            Cancelar
-          </button>
-          <button className="btn-primary !px-3 !py-1.5 !text-xs" onClick={onConfirm}>
-            Confirmar perda
-          </button>
+          <button className="btn-ghost !px-3 !py-1.5 !text-xs" onClick={onCancel}>Cancelar</button>
+          <button className="btn-primary !px-3 !py-1.5 !text-xs" onClick={onConfirm}>Confirmar perda</button>
         </div>
       </div>
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// NotesPanel
+// ---------------------------------------------------------------------------
 
 function NotesPanel({
   notes,
@@ -1216,14 +1332,11 @@ function NotesPanel({
       <div className="scroll-slim min-h-0 flex-1 space-y-2 overflow-y-auto">
         {notes.length === 0 && (
           <p className="py-6 text-center text-xs text-zinc-500">
-            Nenhuma anotação ainda. Registre observações da negociação aqui.
+            Nenhuma anotação ainda.
           </p>
         )}
         {notes.map((n) => (
-          <div
-            key={n.id}
-            className="rounded-lg border border-night-700/70 bg-night-800/50 p-2 transition-colors hover:border-night-600"
-          >
+          <div key={n.id} className="rounded-lg border border-night-700/70 bg-night-800/50 p-2 transition-colors hover:border-night-600">
             <div className="flex items-center justify-between gap-2">
               <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-brand">
                 <span className="h-1 w-1 rounded-full bg-brand" />
@@ -1246,11 +1359,7 @@ function NotesPanel({
           }}
         />
         <div className="mt-1.5 flex justify-end">
-          <button
-            className="btn-primary !px-3 !py-1.5 !text-[11px]"
-            disabled={!draft.trim()}
-            onClick={onSave}
-          >
+          <button className="btn-primary !px-3 !py-1.5 !text-[11px]" disabled={!draft.trim()} onClick={onSave}>
             Salvar anotação
           </button>
         </div>
@@ -1258,6 +1367,10 @@ function NotesPanel({
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// CommandPalette
+// ---------------------------------------------------------------------------
 
 function CommandPalette({
   conversations,
@@ -1281,22 +1394,13 @@ function CommandPalette({
     if (!q) return conversations.slice(0, 8);
     return conversations
       .filter((c) => {
-        const haystack = [
-          c.customerName ?? '',
-          c.whatsappId,
-          c.quote?.code ?? '',
-          ...(c.quote?.items ?? []).map((i) => i.name),
-        ]
-          .join(' ')
-          .toLowerCase();
+        const haystack = [c.customerName ?? '', c.whatsappId, c.quote?.code ?? '', ...(c.quote?.items ?? []).map((i) => i.name)].join(' ').toLowerCase();
         return haystack.includes(q);
       })
       .slice(0, 8);
   }, [conversations, query]);
 
-  useEffect(() => {
-    setHighlight(0);
-  }, [query]);
+  useEffect(() => { setHighlight(0); }, [query]);
 
   function onKeyDown(e: ReactKeyboardEvent) {
     if (e.key === 'ArrowDown') {
@@ -1315,17 +1419,10 @@ function CommandPalette({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-night-950/70 p-4 pt-[12vh] backdrop-blur-sm"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-night-950/70 p-4 pt-[12vh] backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="surface w-full max-w-xl overflow-hidden !p-0 shadow-pop">
         <div className="flex items-center gap-2.5 border-b border-night-700/70 px-3">
-          <span className="text-zinc-500">
-            <SearchIcon />
-          </span>
+          <span className="text-zinc-500"><SearchIcon /></span>
           <input
             ref={inputRef}
             className="input !border-0 !bg-transparent !px-0 !py-3 !text-sm !shadow-none !ring-0"
@@ -1334,15 +1431,11 @@ function CommandPalette({
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
           />
-          <kbd className="ml-auto rounded border border-night-600 bg-night-800 px-1 font-mono text-[9px] text-zinc-500">
-            Esc
-          </kbd>
+          <kbd className="ml-auto rounded border border-night-600 bg-night-800 px-1 font-mono text-[9px] text-zinc-500">Esc</kbd>
         </div>
         <div className="scroll-slim max-h-[50vh] overflow-y-auto p-1.5">
           {results.length === 0 && (
-            <p className="px-3 py-8 text-center text-xs text-zinc-500">
-              Nenhum resultado para "{query}".
-            </p>
+            <p className="px-3 py-8 text-center text-xs text-zinc-500">Nenhum resultado para &quot;{query}&quot;.</p>
           )}
           {results.map((c, i) => {
             const match = c.quote?.code ?? null;
@@ -1351,32 +1444,20 @@ function CommandPalette({
                 key={c.id}
                 onClick={() => onSelect(c.id)}
                 onMouseEnter={() => setHighlight(i)}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
-                  i === highlight ? 'bg-night-700/70' : 'hover:bg-night-800/60'
-                }`}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${i === highlight ? 'bg-night-700/70' : 'hover:bg-night-800/60'}`}
               >
-                <span
-                  className={`h-2 w-2 shrink-0 rounded-full ${statusDot(c.funnelStatus)}`}
-                />
+                <span className={`h-2 w-2 shrink-0 rounded-full ${statusDot(c.funnelStatus)}`} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-semibold text-zinc-100">
-                    {c.customerName || c.whatsappId}
-                  </span>
+                  <span className="block truncate text-xs font-semibold text-zinc-100">{c.customerName || c.whatsappId}</span>
                   <span className="block truncate text-[10px] text-zinc-500">
-                    {c.whatsappId}
-                    {c.quote && c.quote.items.length > 0
-                      ? ` · ${c.quote.items.slice(0, 2).map((i) => i.name).join(', ')}`
-                      : ''}
+                    {formatPhoneBR(c.whatsappId)}
+                    {c.quote && c.quote.items.length > 0 ? ` · ${c.quote.items.slice(0, 2).map((i) => i.name).join(', ')}` : ''}
                   </span>
                 </span>
                 {match && (
-                  <span className="shrink-0 rounded-md bg-brand/10 px-1.5 font-mono text-[10px] text-brand ring-1 ring-inset ring-brand/25">
-                    {match}
-                  </span>
+                  <span className="shrink-0 rounded-md bg-brand/10 px-1.5 font-mono text-[10px] text-brand ring-1 ring-inset ring-brand/25">{match}</span>
                 )}
-                <span
-                  className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold ring-1 ring-inset ${statusPill(c.funnelStatus)}`}
-                >
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold ring-1 ring-inset ${statusPill(c.funnelStatus)}`}>
                   {FUNNEL_STATUS_LABELS[c.funnelStatus as keyof typeof FUNNEL_STATUS_LABELS] ?? c.funnelStatus}
                 </span>
               </button>
@@ -1388,19 +1469,13 @@ function CommandPalette({
   );
 }
 
+// ---------------------------------------------------------------------------
+// SearchIcon
+// ---------------------------------------------------------------------------
+
 function SearchIcon() {
   return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <circle cx="11" cy="11" r="8" />
       <path d="m21 21-4.35-4.35" />
     </svg>
