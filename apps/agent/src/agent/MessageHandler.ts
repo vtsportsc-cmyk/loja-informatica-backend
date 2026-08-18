@@ -377,7 +377,8 @@ ${faqContext}`;
         if (fsm.canTransition('INTENT_PURCHASE')) {
           fsm.transition({ type: 'INTENT_PURCHASE' });
         }
-        const report = JSON.parse(toolResult) as CompatibilityReport;
+        const report = this.parseToolJson<CompatibilityReport>(name, toolResult);
+        if (!report) break;
         session.lastCompatibility = report;
         if (report.compatible && fsm.current === BotStateId.HARDWARE_CHECK) {
           fsm.transition({ type: 'SPECS_CONFIRMED' });
@@ -391,7 +392,8 @@ ${faqContext}`;
         if (fsm.current === BotStateId.HARDWARE_CHECK) {
           fsm.transition({ type: 'SPECS_CONFIRMED' });
         }
-        const cart = JSON.parse(toolResult) as CartResult;
+        const cart = this.parseToolJson<CartResult>(name, toolResult);
+        if (!cart) break;
         session.cart = cart;
         session.lockIds = Array.from(
           new Set([
@@ -407,14 +409,30 @@ ${faqContext}`;
         break;
       }
       case 'check_order_status': {
-        const payload = JSON.parse(toolResult) as { ok: boolean; order?: OrderStatusInfo };
-        if (payload.ok && payload.order) {
+        const payload = this.parseToolJson<{ ok: boolean; order?: OrderStatusInfo }>(name, toolResult);
+        if (payload?.ok && payload.order) {
           session.lastTrackedOrder = payload.order;
         }
         break;
       }
       default:
         break;
+    }
+  }
+
+  /**
+   * Faz o parse do JSON retornado por uma tool. A LLM as vezes devolve uma tool
+   * call com argumentos/JSON malformado; sem isso, um `SyntaxError` aqui derruba
+   * o request inteiro e o bot para de responder (ver B1 no relatorio de auditoria).
+   */
+  private parseToolJson<T>(toolName: string, raw: string): T | null {
+    try {
+      return JSON.parse(raw) as T;
+    } catch (err) {
+      this.logger(
+        `falha ao interpretar JSON da tool "${toolName}": ${(err as Error).message}. raw="${raw.slice(0, 200)}"`,
+      );
+      return null;
     }
   }
 }

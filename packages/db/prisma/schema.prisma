@@ -160,6 +160,7 @@ model Message {
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])
+  @@index([whatsappId])
 }
 
 model Quote {

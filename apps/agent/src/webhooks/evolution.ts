@@ -99,6 +99,11 @@ export class EvolutionWebhookHandler {
         return { ok: true, skipped: 'broadcast' };
       }
 
+      if (key.id && (await this.repository.hasProcessedWhatsappMessage(key.id))) {
+        this.logger(`mensagem ${key.id} ja processada; reenvio do webhook ignorado (idempotencia).`);
+        return { ok: true, handled: false, skipped: 'duplicate_message' };
+      }
+
       const phone = remoteJid.replace(/@s\.whatsapp\.net$/i, '');
       const name = payload.data?.pushName || null;
 

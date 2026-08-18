@@ -145,6 +145,8 @@ export interface IMessageRepository {
   listAgents(): Promise<AgentRecord[]>;
   saveInboundMessage(conversationId: string, input: MessageInput): Promise<void>;
   saveOutboundMessage(conversationId: string, input: MessageInput): Promise<void>;
+  /** Idempotencia de webhook: true se ja existe mensagem com esse whatsappId (evita duplicata em reenvio). */
+  hasProcessedWhatsappMessage(whatsappId: string): Promise<boolean>;
   touchConversation(conversationId: string, opts: { at?: string; unreadDelta?: number }): Promise<void>;
   markRead(conversationId: string): Promise<void>;
   assume(conversationId: string, agentId: string): Promise<void>;
@@ -309,6 +311,14 @@ export class PrismaMessageRepository implements IMessageRepository {
         responseTimeMs: 0,
       },
     });
+  }
+
+  async hasProcessedWhatsappMessage(whatsappId: string): Promise<boolean> {
+    const existing = await this.prisma.message.findFirst({
+      where: { whatsappId },
+      select: { id: true },
+    });
+    return existing !== null;
   }
 
   async saveOutboundMessage(conversationId: string, input: MessageInput): Promise<void> {
@@ -821,6 +831,10 @@ export class InMemoryMessageRepository implements IMessageRepository {
 
   async saveOutboundMessage(conversationId: string, input: MessageInput): Promise<void> {
     this.messages.push({ conversationId, input, direction: 'outbound', at: new Date().toISOString() });
+  }
+
+  async hasProcessedWhatsappMessage(whatsappId: string): Promise<boolean> {
+    return this.messages.some((m) => m.input.whatsappId === whatsappId);
   }
 
   async touchConversation(
