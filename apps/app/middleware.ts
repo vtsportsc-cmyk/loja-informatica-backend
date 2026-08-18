@@ -27,8 +27,18 @@ function unauthorized(): NextResponse {
 }
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
-  const username = process.env.CRM_PANEL_USERNAME || 'admin';
-  const password = process.env.CRM_PANEL_PASSWORD || 'loja-admin';
+  const username = process.env.CRM_PANEL_USERNAME;
+  const password = process.env.CRM_PANEL_PASSWORD;
+
+  if (!username || !password) {
+    console.error(
+      '[middleware] CRM_PANEL_USERNAME e/ou CRM_PANEL_PASSWORD nao definidos. Acesso ao painel CRM bloqueado.',
+    );
+    return new NextResponse('Painel desabilitado: credenciais nao configuradas', {
+      status: 503,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    });
+  }
 
   const header = req.headers.get('authorization') ?? '';
   const match = /^Basic\s+(.+)$/i.exec(header);
