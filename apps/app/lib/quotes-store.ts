@@ -51,9 +51,11 @@ export function summarizeItems(items: QuoteItemJson[]) {
 
 export function makeQuoteCode(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const buf = new Uint8Array(6);
+  crypto.getRandomValues(buf);
   let out = '';
   for (let i = 0; i < 6; i += 1) {
-    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+    out += alphabet[buf[i] % alphabet.length];
   }
   return `Q-${out}`;
 }

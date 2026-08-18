@@ -198,8 +198,8 @@ describe('MessageRepository - persistencia das metricas de LLM', () => {
     await repo.saveInboundMessage(conversation.id, { type: 'text', text: 'ola' });
 
     const messages = await repo.listMessages(conversation.id);
-    const outbound = messages.find((m) => m.direction === 'outbound');
-    const inbound = messages.find((m) => m.direction === 'inbound');
+    const outbound = messages.items.find((m) => m.direction === 'outbound');
+    const inbound = messages.items.find((m) => m.direction === 'inbound');
 
     expect(outbound?.tokensUsed).toBe(150);
     expect(outbound?.responseTimeMs).toBe(812);

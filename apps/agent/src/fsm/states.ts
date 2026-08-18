@@ -47,6 +47,7 @@ export const TRANSITIONS: readonly Transition[] = [
   { from: BotStateId.PAYMENT_PENDING, on: 'HANDOFF', to: BotStateId.HANDOFF },
 
   { from: BotStateId.PAYMENT_CONFIRMED, on: 'RESTART', to: BotStateId.GREETING },
+  { from: BotStateId.PAYMENT_CONFIRMED, on: 'HANDOFF', to: BotStateId.HANDOFF },
 
   { from: BotStateId.GREETING, on: 'TRACK_ORDER', to: BotStateId.TRACK_ORDER },
   { from: BotStateId.HARDWARE_CHECK, on: 'TRACK_ORDER', to: BotStateId.TRACK_ORDER },

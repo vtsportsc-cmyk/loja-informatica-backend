@@ -3,6 +3,7 @@ import { FaqService } from '../rag/faq.js';
 import { InstitutionalAnswerService } from '../rag/institutionalAnswers.js';
 import { LLMProviderRouter } from '../llm/LLMProviderRouter.js';
 import type { LlmChatMessage, LlmToolCall } from '../llm/types.js';
+import { LlmAllProvidersFailedError } from '../llm/errors.js';
 import { BotStateMachine } from '../fsm/BotStateMachine.js';
 import type { TransitionResult } from '../fsm/BotStateMachine.js';
 import { BotStateId } from '../fsm/states.js';
@@ -141,12 +142,25 @@ export class MessageHandler {
       let rounds = 0;
 
       while (rounds < this.maxToolRounds) {
-        const llmResult = await this.router.chat({
-          messages,
-          tools: this.tools.definitions,
-          toolChoice: 'auto',
-          temperature: 0.4,
-        });
+        let llmResult;
+        try {
+          llmResult = await this.router.chat({
+            messages,
+            tools: this.tools.definitions,
+            toolChoice: 'auto',
+            temperature: 0.4,
+          });
+        } catch (err) {
+          if (err instanceof LlmAllProvidersFailedError) {
+            this.logger(
+              `[${inbound.ticketId}] todos os providers de LLM falharam: ${(err as Error).message}`,
+            );
+            this.metrics.recordLlmAllFailed(inbound.ticketId);
+            replyText = 'Estamos com uma dificuldade temporaria no atendimento automatico. Por favor, tente novamente em alguns instantes ou aguarde um atendente.';
+            break;
+          }
+          throw err;
+        }
         rounds += 1;
         tokensUsed +=
           (llmResult.usage?.promptTokens ?? 0) + (llmResult.usage?.completionTokens ?? 0);

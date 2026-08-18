@@ -40,6 +40,7 @@ interface MetricsSnapshot {
   totalRateLimited: number;
   /** Respostas institucionais servidas sem LLM (cache de FAQs). */
   institutionalAnswers: { matched: number; cacheHits: number };
+  llmAllFailed: number;
 }
 
 export class Metrics {
@@ -109,6 +110,13 @@ export class Metrics {
     this.rateLimited.set(key, (this.rateLimited.get(key) ?? 0) + 1);
   }
 
+  private llmAllFailed = 0;
+
+  recordLlmAllFailed(ticketId: string): void {
+    this.llmAllFailed += 1;
+    console.warn(`[metrics] LLM all providers failed for ticket ${ticketId}`);
+  }
+
   snapshot(): MetricsSnapshot {
     const llm: MetricsSnapshot['llm'] = [];
     for (const [key, acc] of this.llm) {
@@ -128,6 +136,7 @@ export class Metrics {
         matched: this.institutionalMatched,
         cacheHits: this.institutionalCacheHits,
       },
+      llmAllFailed: this.llmAllFailed,
     };
   }
 
@@ -166,6 +175,8 @@ export class Metrics {
     lines.push('# HELP institutional_answers_total Respostas institucionais servidas sem LLM (cache de FAQ).', '# TYPE institutional_answers_total counter');
     lines.push(`institutional_answers_total{result="matched"} ${s.institutionalAnswers.matched}`);
     lines.push(`institutional_answers_total{result="cache_hit"} ${s.institutionalAnswers.cacheHits}`);
+    lines.push('# TYPE llm_all_failed_total counter');
+    lines.push(`llm_all_failed_total ${s.llmAllFailed}`);
     return lines.join('\n') + '\n';
   }
 }

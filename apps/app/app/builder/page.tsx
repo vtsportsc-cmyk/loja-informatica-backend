@@ -146,7 +146,35 @@ export default function BuilderPage() {
   }
 
   if (!data) {
-    return <main className="mx-auto max-w-6xl px-4 py-16 text-center text-zinc-500">Carregando catálogo...</main>;
+    return (
+      <main className="mx-auto max-w-6xl px-4 py-8">
+        <div className="mb-6">
+          <div className="skeleton h-8 w-48" />
+          <div className="skeleton mt-2 h-4 w-80" />
+        </div>
+        <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
+          <div className="space-y-4">
+            {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+              <div key={i} className="card">
+                <div className="skeleton h-4 w-28" />
+                <div className="skeleton mt-2 h-9 w-full" />
+              </div>
+            ))}
+          </div>
+          <aside className="space-y-4">
+            <div className="card sticky top-16">
+              <div className="skeleton h-5 w-20" />
+              <div className="skeleton mt-3 h-4 w-full" />
+              <div className="skeleton mt-1 h-4 w-3/4" />
+              <div className="skeleton mt-1 h-4 w-1/2" />
+              <div className="divider mt-4" />
+              <div className="skeleton mt-3 h-4 w-full" />
+              <div className="skeleton mt-2 h-10 w-full" />
+            </div>
+          </aside>
+        </div>
+      </main>
+    );
   }
 
   return (

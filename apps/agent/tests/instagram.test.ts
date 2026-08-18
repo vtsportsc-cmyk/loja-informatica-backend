@@ -98,9 +98,9 @@ describe('InstagramWebhookHandler - captura de leads por comentario', () => {
     expect(conv?.customerName).toBe('Joao da Silva');
 
     const messages = await repository.listMessages(conv!.id);
-    expect(messages).toHaveLength(2);
-    expect(messages[0]).toMatchObject({ direction: 'inbound', text: 'quero montar um pc gamer' });
-    expect(messages[1]).toMatchObject({ direction: 'outbound' });
+    expect(messages.items).toHaveLength(2);
+    expect(messages.items[0]).toMatchObject({ direction: 'inbound', text: 'quero montar um pc gamer' });
+    expect(messages.items[1]).toMatchObject({ direction: 'outbound' });
 
     const notes = await repository.listNotes(conv!.id);
     expect(notes.some((n) => n.text.includes('Comentário no Instagram'))).toBe(true);

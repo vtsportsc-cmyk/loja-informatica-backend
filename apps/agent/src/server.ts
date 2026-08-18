@@ -166,7 +166,10 @@ async function handle(
     if (!container.panelApi.checkAuth(req.headers['x-agent-key'] as string | undefined)) {
       return json(res, 401, { error: 'chave de API invalida' });
     }
-    const result = await container.panelApi.listConversations();
+    const cursor = url.searchParams.get('cursor') ?? undefined;
+    const limitParam = url.searchParams.get('limit');
+    const limit = limitParam ? Number(limitParam) : undefined;
+    const result = await container.panelApi.listConversations({ cursor, limit });
     return json(res, result.status ?? 400, result.ok ? result.data ?? {} : { error: result.error });
   }
 

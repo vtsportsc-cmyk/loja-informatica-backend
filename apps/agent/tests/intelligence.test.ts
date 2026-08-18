@@ -236,8 +236,8 @@ describe('Follow-up de orcamentos inativos', () => {
     expect(sent[0]?.text).toContain('Q-1010');
 
     const messages = await repository.listMessages(conv.id);
-    expect(messages).toHaveLength(1);
-    expect(messages[0]?.direction).toBe('outbound');
+    expect(messages.items).toHaveLength(1);
+    expect(messages.items[0]?.direction).toBe('outbound');
 
     const timeline = await repository.listTimeline(conv.id);
     expect(timeline.some((e) => e.type === 'FOLLOW_UP_SENT')).toBe(true);

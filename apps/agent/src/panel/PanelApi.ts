@@ -65,9 +65,9 @@ export class PanelApi {
     return Boolean(this.apiKey) && key === this.apiKey;
   }
 
-  async listConversations(): Promise<PanelApiResult> {
-    const conversations = await this.repository.listConversations();
-    return { ok: true, status: 200, data: { conversations } };
+  async listConversations(opts?: { cursor?: string; limit?: number }): Promise<PanelApiResult> {
+    const result = await this.repository.listConversations(opts);
+    return { ok: true, status: 200, data: result };
   }
 
   async getConversation(conversationId: string): Promise<PanelApiResult> {
@@ -75,10 +75,10 @@ export class PanelApi {
     if (!conversation) {
       return { ok: false, status: 404, error: 'conversa nao encontrada' };
     }
-    const messages = await this.repository.listMessages(conversationId);
+    const messagesResult = await this.repository.listMessages(conversationId);
     const timeline = await this.repository.listTimeline(conversationId);
     const notes = await this.repository.listNotes(conversationId);
-    return { ok: true, status: 200, data: { conversation, messages, timeline, notes } };
+    return { ok: true, status: 200, data: { conversation, messages: messagesResult.items, timeline, notes } };
   }
 
   async sendMessage(body: unknown): Promise<PanelApiResult> {

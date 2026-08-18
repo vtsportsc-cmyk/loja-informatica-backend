@@ -100,9 +100,9 @@ describe('Automacao por mudanca de estagio do funil', () => {
     expect(msg).toContain('PIX');
 
     const messages = await repository.listMessages(conv.id);
-    expect(messages).toHaveLength(1);
-    expect(messages[0]?.direction).toBe('outbound');
-    expect(messages[0]?.text).toContain('Q-ABC123');
+    expect(messages.items).toHaveLength(1);
+    expect(messages.items[0]?.direction).toBe('outbound');
+    expect(messages.items[0]?.text).toContain('Q-ABC123');
   });
 
   it('AGUARDANDO_NF envia confirmacao de pagamento e NF', async () => {

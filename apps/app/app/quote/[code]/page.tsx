@@ -52,7 +52,28 @@ export default function QuotePage() {
 
   const quote = data?.quote;
   if (!quote) {
-    return <main className="mx-auto max-w-2xl px-4 py-16 text-center text-zinc-500">Carregando...</main>;
+    return (
+      <main className="mx-auto max-w-2xl px-4 py-8">
+        <div className="skeleton h-8 w-48" />
+        <div className="skeleton mt-2 h-4 w-32" />
+        <div className="card mt-6">
+          <div className="space-y-2">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="flex items-center justify-between gap-3">
+                <div className="skeleton h-4 w-48" />
+                <div className="skeleton h-4 w-20" />
+              </div>
+            ))}
+          </div>
+          <div className="divider mt-4" />
+          <div className="space-y-2 pt-2">
+            <div className="flex justify-between"><div className="skeleton h-4 w-20" /><div className="skeleton h-4 w-24" /></div>
+            <div className="flex justify-between"><div className="skeleton h-4 w-24" /><div className="skeleton h-4 w-24" /></div>
+            <div className="flex justify-between"><div className="skeleton h-5 w-20" /><div className="skeleton h-5 w-28" /></div>
+          </div>
+        </div>
+      </main>
+    );
   }
 
   return (

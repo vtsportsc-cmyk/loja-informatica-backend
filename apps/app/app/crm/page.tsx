@@ -91,7 +91,7 @@ export default function CrmPage() {
       setError(body.error ?? 'falha ao listar conversas');
       return;
     }
-    setConversations(body.conversations ?? []);
+    setConversations(body.items ?? body.conversations ?? []);
     setLoading(false);
   }, []);
 
@@ -390,7 +390,26 @@ export default function CrmPage() {
       )}
 
       {loading ? (
-        <p className="py-16 text-center text-sm text-zinc-500">Carregando operações...</p>
+        <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[1fr_1fr_1fr]">
+          {[1, 2, 3].map((col) => (
+            <div key={col} className="surface flex flex-col gap-2 p-3">
+              <div className="skeleton h-5 w-24" />
+              <div className="space-y-2">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="rounded-lg border border-night-700/50 bg-night-800/40 p-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="skeleton h-2 w-2 shrink-0 rounded-full" />
+                      <div className="skeleton h-3.5 w-28" />
+                      <div className="skeleton ml-auto h-3 w-8" />
+                    </div>
+                    <div className="skeleton mt-1.5 h-3 w-36" />
+                    <div className="skeleton mt-1 h-2.5 w-20" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       ) : module === 'funil' ? (
         <CrmKanbanView
           conversations={conversations}

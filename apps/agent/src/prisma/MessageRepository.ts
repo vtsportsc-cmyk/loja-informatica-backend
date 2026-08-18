@@ -129,6 +129,21 @@ export interface QuoteSummary {
   items: QuoteItemRecord[];
 }
 
+export interface PaginatedResult<T> {
+  items: T[];
+  nextCursor: string | null;
+}
+
+export interface ListConversationsOptions {
+  cursor?: string;
+  limit?: number;
+}
+
+export interface ListMessagesOptions {
+  cursor?: string;
+  limit?: number;
+}
+
 export interface IMessageRepository {
   /** Ping de saude do banco (SELECT 1 no PostgreSQL; true no modo memoria). */
   ping(): Promise<boolean>;
@@ -140,8 +155,8 @@ export interface IMessageRepository {
   ): Promise<ConversationRecord>;
   getConversationById(id: string): Promise<ConversationRecord | null>;
   getConversationByWhatsapp(whatsappId: string): Promise<ConversationRecord | null>;
-  listConversations(): Promise<ConversationRecord[]>;
-  listMessages(conversationId: string): Promise<MessageRecord[]>;
+  listConversations(opts?: ListConversationsOptions): Promise<PaginatedResult<ConversationRecord>>;
+  listMessages(conversationId: string, opts?: ListMessagesOptions): Promise<PaginatedResult<MessageRecord>>;
   listAgents(): Promise<AgentRecord[]>;
   saveInboundMessage(conversationId: string, input: MessageInput): Promise<void>;
   saveOutboundMessage(conversationId: string, input: MessageInput): Promise<void>;
@@ -264,33 +279,51 @@ export class PrismaMessageRepository implements IMessageRepository {
       : null;
   }
 
-  async listConversations(): Promise<ConversationRecord[]> {
+  async listConversations(opts?: ListConversationsOptions): Promise<PaginatedResult<ConversationRecord>> {
+    const limit = Math.min(opts?.limit ?? 50, 200);
     const convs = await this.prisma.conversation.findMany({
       include: { customer: true, quote: { include: { items: true } } },
       orderBy: { lastMessageAt: 'desc' },
-      take: 200,
+      take: limit + 1,
+      ...(opts?.cursor
+        ? { cursor: { id: opts.cursor }, skip: 1 }
+        : {}),
     });
-    return convs.map((c) =>
-      toConversationRecord(c, c.customer.name, c.customer.whatsappId, mapQuoteSummary(c.quote)),
-    );
+    const hasMore = convs.length > limit;
+    const items = hasMore ? convs.slice(0, limit) : convs;
+    return {
+      items: items.map((c) =>
+        toConversationRecord(c, c.customer.name, c.customer.whatsappId, mapQuoteSummary(c.quote)),
+      ),
+      nextCursor: hasMore ? items[items.length - 1]?.id ?? null : null,
+    };
   }
 
-  async listMessages(conversationId: string): Promise<MessageRecord[]> {
+  async listMessages(conversationId: string, opts?: ListMessagesOptions): Promise<PaginatedResult<MessageRecord>> {
+    const limit = Math.min(opts?.limit ?? 100, 500);
     const messages = await this.prisma.message.findMany({
       where: { conversationId },
       orderBy: { createdAt: 'asc' },
-      take: 200,
+      take: limit + 1,
+      ...(opts?.cursor
+        ? { cursor: { id: opts.cursor }, skip: 1 }
+        : {}),
     });
-    return messages.map((m) => ({
-      id: m.id,
-      direction: m.direction === 'inbound' ? 'inbound' : 'outbound',
-      type: m.type,
-      text: m.text,
-      agentId: m.agentId,
-      tokensUsed: m.tokensUsed,
-      responseTimeMs: m.responseTimeMs,
-      createdAt: m.createdAt.toISOString(),
-    }));
+    const hasMore = messages.length > limit;
+    const items = hasMore ? messages.slice(0, limit) : messages;
+    return {
+      items: items.map((m) => ({
+        id: m.id,
+        direction: m.direction === 'inbound' ? 'inbound' : 'outbound',
+        type: m.type,
+        text: m.text,
+        agentId: m.agentId,
+        tokensUsed: m.tokensUsed,
+        responseTimeMs: m.responseTimeMs,
+        createdAt: m.createdAt.toISOString(),
+      })),
+      nextCursor: hasMore ? items[items.length - 1]?.id ?? null : null,
+    };
   }
 
   async listAgents(): Promise<AgentRecord[]> {
@@ -825,17 +858,41 @@ export class InMemoryMessageRepository implements IMessageRepository {
     return { ...conv, quote: this.quoteSummaries.get(id) ?? null };
   }
 
-  async listConversations(): Promise<ConversationRecord[]> {
-    return [...this.conversations.values()]
+  async listConversations(opts?: ListConversationsOptions): Promise<PaginatedResult<ConversationRecord>> {
+    const limit = Math.min(opts?.limit ?? 50, 200);
+    const sorted = [...this.conversations.values()]
       .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''))
       .map((conv) => ({ ...conv, quote: this.quoteSummaries.get(conv.id) ?? null }));
+
+    let startIdx = 0;
+    if (opts?.cursor) {
+      const cursorIdx = sorted.findIndex((c) => c.id === opts.cursor);
+      startIdx = cursorIdx >= 0 ? cursorIdx + 1 : 0;
+    }
+
+    const page = sorted.slice(startIdx, startIdx + limit);
+    const hasMore = startIdx + limit < sorted.length;
+    return {
+      items: page,
+      nextCursor: hasMore ? page[page.length - 1]?.id ?? null : null,
+    };
   }
 
-  async listMessages(conversationId: string): Promise<MessageRecord[]> {
-    return this.messages
-      .filter((m) => m.conversationId === conversationId)
-      .map((m, i) => ({
-        id: `msg-${i}`,
+  async listMessages(conversationId: string, opts?: ListMessagesOptions): Promise<PaginatedResult<MessageRecord>> {
+    const limit = Math.min(opts?.limit ?? 100, 500);
+    const all = this.messages.filter((m) => m.conversationId === conversationId);
+
+    let startIdx = 0;
+    if (opts?.cursor) {
+      const cursorIdx = all.findIndex((m) => `msg-${all.indexOf(m)}` === opts.cursor);
+      startIdx = cursorIdx >= 0 ? cursorIdx + 1 : 0;
+    }
+
+    const page = all.slice(startIdx, startIdx + limit);
+    const hasMore = startIdx + limit < all.length;
+    return {
+      items: page.map((m, i) => ({
+        id: `msg-${startIdx + i}`,
         direction: m.direction === 'inbound' ? 'inbound' : 'outbound',
         type: m.input.type,
         text: m.input.text ?? null,
@@ -843,7 +900,9 @@ export class InMemoryMessageRepository implements IMessageRepository {
         tokensUsed: m.input.tokensUsed ?? 0,
         responseTimeMs: m.input.responseTimeMs ?? 0,
         createdAt: m.at,
-      }));
+      })),
+      nextCursor: hasMore ? `msg-${startIdx + limit}` : null,
+    };
   }
 
   async listAgents(): Promise<AgentRecord[]> {

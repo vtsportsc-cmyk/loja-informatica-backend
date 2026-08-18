@@ -73,4 +73,20 @@ body {
     scrollbar-width: thin;
     scrollbar-color: #27272a transparent;
   }
+
+  .skeleton {
+    @apply relative overflow-hidden rounded-lg bg-night-800;
+  }
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%);
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  }
+}
+
+@keyframes skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
 }

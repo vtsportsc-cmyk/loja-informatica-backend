@@ -73,7 +73,7 @@ export class PaymentWebhookProcessor {
     fsm.transition({ type: 'PAYMENT_CONFIRMED', orderId: notification.orderId });
 
     const customer = this.getCustomer(session);
-    const order = await this.erpClient.createOrder({
+    const order = await this.createOrderWithRetry({
       ticketId: session.ticketId,
       customer: {
         name: customer.name,
@@ -94,6 +94,19 @@ export class PaymentWebhookProcessor {
         orderId: notification.orderId,
       },
     });
+
+    if (!order) {
+      session.botState = BotStateId.PAYMENT_PENDING;
+      await this.sessionStore.save(session);
+      await this.evolution.sendReply({
+        ticketId: session.ticketId,
+        channel: 'whatsapp',
+        type: 'text',
+        text: 'Pagamento confirmado! Tivemos uma dificuldade temporaria ao registrar o pedido. Um vendedor vai te ajudar em breve para concluir.',
+      });
+      this.metrics.recordWebhook('payment.erp_failure', false);
+      throw new PaymentErpFailureError(notification);
+    }
 
     session.orderId = order.orderId;
     session.botState = fsm.current;
@@ -197,6 +210,29 @@ export class PaymentWebhookProcessor {
     }
     return released;
   }
+
+  private async createOrderWithRetry(
+    orderData: Parameters<ErpClient['createOrder']>[0],
+    maxRetries = 3,
+  ): Promise<{ orderId: string } | null> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.erpClient.createOrder(orderData);
+      } catch (err) {
+        lastError = err;
+        if (attempt < maxRetries) {
+          const delayMs = 500 * Math.pow(2, attempt - 1);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+    console.error(
+      `[payment] ERP createOrder falhou apos ${maxRetries} tentativas:`,
+      (lastError as Error).message,
+    );
+    return null;
+  }
 }
 
 export class PaymentWebhookError extends Error {
@@ -222,5 +258,15 @@ export class PaymentSessionNotFoundError extends PaymentWebhookError {
       `Nenhuma sessao encontrada para a notificacao de pagamento (orderId=${notification.orderId}, ticketId=${notification.ticketId ?? 'n/a'})`,
     );
     this.name = 'PaymentSessionNotFoundError';
+  }
+}
+
+export class PaymentErpFailureError extends PaymentWebhookError {
+  constructor(notification: PaymentNotification) {
+    super(
+      notification,
+      `Falha ao criar pedido no ERP apos multiplas tentativas (orderId=${notification.orderId})`,
+    );
+    this.name = 'PaymentErpFailureError';
   }
 }
