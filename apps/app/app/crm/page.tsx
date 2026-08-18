@@ -11,10 +11,12 @@ import { formatPhoneBR } from '@/lib/phone';
 import { SystemHealthBadge } from '@/components/system-health';
 import { CrmKanbanView } from '@/components/crm/CrmKanban';
 import { CrmAnalytics } from '@/components/crm/CrmAnalytics';
+import { CrmDashboard } from '@/components/crm/CrmDashboard';
 import type { Agent, Conversation, QuoteSummary, TimelineEvent, Note } from '@/lib/crm-types';
 import { fmtTime, fmtDate, statusPill, statusDot } from '@/lib/crm-types';
 
 type ModuleId = 'funil' | 'atendimento' | 'pedidos' | 'bi';
+type CrmView = 'workstation' | 'dashboard';
 
 interface Message {
   id: string;
@@ -175,6 +177,7 @@ export default function CrmPage() {
   const [sending, setSending] = useState(false);
   const [typing, setTyping] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
+  const [crmView, setCrmView] = useState<CrmView>('workstation');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -452,7 +455,11 @@ export default function CrmPage() {
         <div className="flex items-center gap-4">
           <div>
             <h1 className="text-lg font-bold tracking-tight text-zinc-50">Painel de Operações</h1>
-            <p className="text-[11px] text-zinc-500">Workstation de atendimento multi-atendente</p>
+            <p className="text-[11px] text-zinc-500">
+              {module === 'atendimento' && crmView === 'dashboard'
+                ? 'Dashboard gerencial — visão executiva'
+                : 'Workstation de atendimento multi-atendente'}
+            </p>
           </div>
           <nav className="flex rounded-lg border border-night-700/70 bg-night-800/40 p-0.5">
             {MODULES.map((m) => (
@@ -470,6 +477,39 @@ export default function CrmPage() {
               </button>
             ))}
           </nav>
+          {module === 'atendimento' && (
+            <div className="flex rounded-lg border border-night-700/70 bg-night-800/40 p-0.5">
+              <button
+                onClick={() => setCrmView('workstation')}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-semibold transition-all ${
+                  crmView === 'workstation'
+                    ? 'bg-night-700 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-100'
+                }`}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+                Workstation
+              </button>
+              <button
+                onClick={() => setCrmView('dashboard')}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-semibold transition-all ${
+                  crmView === 'dashboard'
+                    ? 'bg-night-700 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-100'
+                }`}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <rect width="7" height="9" x="3" y="3" rx="1" />
+                  <rect width="7" height="5" x="14" y="3" rx="1" />
+                  <rect width="7" height="9" x="14" y="12" rx="1" />
+                  <rect width="7" height="5" x="3" y="16" rx="1" />
+                </svg>
+                Dashboard
+              </button>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -544,6 +584,9 @@ export default function CrmPage() {
           onOpen={openConversationInChat}
         />
       ) : module === 'atendimento' ? (
+        crmView === 'dashboard' ? (
+          <CrmDashboard conversations={conversations} agents={agents} />
+        ) : (
         /* ═══════════════════════════════════════════════════════════════
            WORKSTATION 3 COLUNAS
            ═══════════════════════════════════════════════════════════════ */
@@ -953,6 +996,7 @@ export default function CrmPage() {
             )}
           </div>
         </div>
+        )
       ) : module === 'bi' ? (
         <CrmAnalytics conversations={conversations} />
       ) : (
