@@ -21,6 +21,7 @@ export interface PaymentClientOptions {
   apiKey: string;
   /** Segredo compartilhado para validar a assinatura dos webhooks. */
   webhookSecret?: string;
+  timeoutMs?: number;
   fetchImpl?: typeof fetch;
 }
 
@@ -30,12 +31,14 @@ export class PaymentClient {
   private readonly baseURL: string;
   private readonly apiKey: string;
   private readonly webhookSecret?: string;
+  private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: PaymentClientOptions) {
     this.baseURL = options.baseURL.replace(/\/$/, '');
     this.apiKey = options.apiKey;
     this.webhookSecret = options.webhookSecret;
+    this.timeoutMs = options.timeoutMs ?? 10_000;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
@@ -91,6 +94,7 @@ export class PaymentClient {
       method,
       headers,
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
   }
 }

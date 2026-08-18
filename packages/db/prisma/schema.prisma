@@ -99,7 +99,7 @@ model Conversation {
   lastFollowUpAt  DateTime?
   humanMode       Boolean      @default(false)
   assignedAgentId String?
-  assignedAgent   Agent?       @relation(fields: [assignedAgentId], references: [id])
+  assignedAgent   Agent?       @relation(fields: [assignedAgentId], references: [id], onDelete: SetNull)
   lastMessageAt   DateTime     @default(now())
   unreadCount     Int          @default(0)
   createdAt       DateTime     @default(now())
@@ -114,6 +114,8 @@ model Conversation {
   @@index([funnelStatus])
   @@index([department])
   @@index([lastMessageAt])
+  @@index([assignedAgentId])
+  @@index([lastFollowUpAt])
 }
 
 model ConversationNote {
@@ -151,7 +153,7 @@ model Message {
   mediaUrl       String?
   mediaMimeType  String?
   agentId        String?
-  agent          Agent?       @relation(fields: [agentId], references: [id])
+  agent          Agent?       @relation(fields: [agentId], references: [id], onDelete: SetNull)
   whatsappId     String?
   status         String       @default("received")
   // Observabilidade: consumo de tokens e latencia da resposta gerada pela IA.
@@ -167,9 +169,9 @@ model Quote {
   id                   String       @id @default(cuid())
   code                 String       @unique
   customerId           String
-  customer             Customer     @relation(fields: [customerId], references: [id])
+  customer             Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
   conversationId       String?      @unique
-  conversation         Conversation? @relation(fields: [conversationId], references: [id])
+  conversation         Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
   status               String       @default("pending")
   totalCents           Int
   discountCents        Int          @default(0)
@@ -192,6 +194,8 @@ model Quote {
 
   @@index([createdAt])
   @@index([customerId])
+  @@index([status])
+  @@index([blingOrderId])
 }
 
 model QuoteItem {
@@ -207,16 +211,18 @@ model QuoteItem {
   unitPriceCents Int
   quantity       Int    @default(1)
   sort           Int    @default(0)
+
+  @@index([quoteId])
 }
 
 model Lead {
   id                   String       @id @default(cuid())
   customerId           String?
-  customer             Customer?    @relation(fields: [customerId], references: [id])
+  customer             Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
   conversationId       String?      @unique
-  conversation         Conversation? @relation(fields: [conversationId], references: [id])
+  conversation         Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
   quoteId              String?   @unique
-  quote                Quote?       @relation(fields: [quoteId], references: [id])
+  quote                Quote?       @relation(fields: [quoteId], references: [id], onDelete: SetNull)
   status               String       @default("NOVO")
   source               String       @default("whatsapp")
   name                 String?

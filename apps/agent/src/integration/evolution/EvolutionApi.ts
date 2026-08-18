@@ -13,6 +13,7 @@ export interface EvolutionApiOptions {
   baseURL: string;
   instance: string;
   apiKey: string;
+  timeoutMs?: number;
   fetchImpl?: typeof fetch;
 }
 
@@ -34,12 +35,14 @@ export class EvolutionApi {
   private readonly baseURL: string;
   private readonly instance: string;
   private readonly apiKey: string;
+  private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: EvolutionApiOptions) {
     this.baseURL = options.baseURL.replace(/\/$/, '');
     this.instance = options.instance;
     this.apiKey = options.apiKey;
+    this.timeoutMs = options.timeoutMs ?? 10_000;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
@@ -70,7 +73,7 @@ export class EvolutionApi {
     try {
       const res = await this.fetchImpl(
         `${this.baseURL}/instance/connectionState/${encodeURIComponent(this.instance)}`,
-        { method: 'GET', headers: { apikey: this.apiKey } },
+        { method: 'GET', headers: { apikey: this.apiKey }, signal: AbortSignal.timeout(this.timeoutMs) },
       );
       if (!res.ok) {
         return { connected: false, state: 'error', error: `HTTP ${res.status}` };
@@ -129,6 +132,7 @@ export class EvolutionApi {
         apikey: this.apiKey,
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
   }
 }

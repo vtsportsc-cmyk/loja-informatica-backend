@@ -18,6 +18,7 @@ import { ErpRequestError } from './errors.js';
 export interface ErpClientOptions {
   baseURL: string;
   apiToken: string;
+  timeoutMs?: number;
   fetchImpl?: typeof fetch;
 }
 
@@ -25,11 +26,13 @@ export interface ErpClientOptions {
 export class ErpClient {
   private readonly baseURL: string;
   private readonly apiToken: string;
+  private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: ErpClientOptions) {
     this.baseURL = options.baseURL.replace(/\/$/, '');
     this.apiToken = options.apiToken;
+    this.timeoutMs = options.timeoutMs ?? 10_000;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
@@ -82,7 +85,7 @@ export class ErpClient {
       authorization: `Bearer ${this.apiToken}`,
       ...(init.headers as Record<string, string> | undefined),
     };
-    return this.fetchImpl(url, { ...init, headers });
+    return this.fetchImpl(url, { ...init, headers, signal: AbortSignal.timeout(this.timeoutMs) });
   }
 
   private async toError(action: string, res: Response): Promise<ErpRequestError> {

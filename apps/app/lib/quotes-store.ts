@@ -74,56 +74,55 @@ async function persistToDb(quote: StoredQuote): Promise<void> {
     const cleanPhone = (quote.customerPhone ?? '').replace(/\D/g, '');
     const whatsappId = cleanPhone || `guest:${quote.code}`;
 
-    const customer = await prisma.customer.upsert({
-      where: { whatsappId },
-      update: quote.customerName ? { name: quote.customerName } : {},
-      create: { whatsappId, name: quote.customerName ?? null },
-    });
+    await prisma.$transaction(async (tx) => {
+      const customer = await tx.customer.upsert({
+        where: { whatsappId },
+        update: quote.customerName ? { name: quote.customerName } : {},
+        create: { whatsappId, name: quote.customerName ?? null },
+      });
 
-    // Conversa do lead no CRM (funil/kanban): origem BUILDER + UTMs. Se o
-    // cliente ja tem conversa (ex.: veio pelo WhatsApp antes), mantem a
-    // primeira origem e apenas vincula o orcamento a ela.
-    const conversation = await prisma.conversation.upsert({
-      where: { customerId: customer.id },
-      update: {},
-      create: {
-        customerId: customer.id,
-        leadSource: 'BUILDER',
-        utmSource: quote.utmSource,
-        utmMedium: quote.utmMedium,
-        utmCampaign: quote.utmCampaign,
-      },
-    });
-
-    await prisma.quote.create({
-      data: {
-        code: quote.code,
-        customerId: customer.id,
-        conversationId: conversation.id,
-        status: 'pending',
-        totalCents: quote.subtotalCents,
-        discountCents: quote.discountCents,
-        pixTotalCents: quote.pixTotalCents,
-        installments: quote.installments,
-        installmentValueCents: quote.monthlyValueCents,
-        parceledTotalCents: quote.parceledTotalCents,
-        utmSource: quote.utmSource,
-        utmMedium: quote.utmMedium,
-        utmCampaign: quote.utmCampaign,
-        items: {
-          create: quote.items.map((item, index) => ({
-            category: item.category,
-            name: item.name,
-            brand: item.brand,
-            model: item.model,
-            sku: item.sku,
-            specSummary: item.specSummary,
-            unitPriceCents: item.unitPriceCents,
-            quantity: item.quantity,
-            sort: index,
-          })),
+      const conversation = await tx.conversation.upsert({
+        where: { customerId: customer.id },
+        update: {},
+        create: {
+          customerId: customer.id,
+          leadSource: 'BUILDER',
+          utmSource: quote.utmSource,
+          utmMedium: quote.utmMedium,
+          utmCampaign: quote.utmCampaign,
         },
-      },
+      });
+
+      await tx.quote.create({
+        data: {
+          code: quote.code,
+          customerId: customer.id,
+          conversationId: conversation.id,
+          status: 'pending',
+          totalCents: quote.subtotalCents,
+          discountCents: quote.discountCents,
+          pixTotalCents: quote.pixTotalCents,
+          installments: quote.installments,
+          installmentValueCents: quote.monthlyValueCents,
+          parceledTotalCents: quote.parceledTotalCents,
+          utmSource: quote.utmSource,
+          utmMedium: quote.utmMedium,
+          utmCampaign: quote.utmCampaign,
+          items: {
+            create: quote.items.map((item, index) => ({
+              category: item.category,
+              name: item.name,
+              brand: item.brand,
+              model: item.model,
+              sku: item.sku,
+              specSummary: item.specSummary,
+              unitPriceCents: item.unitPriceCents,
+              quantity: item.quantity,
+              sort: index,
+            })),
+          },
+        },
+      });
     });
   } catch (err) {
     console.warn(`[quotes] falha ao persistir ${quote.code} no banco:`, (err as Error).message);

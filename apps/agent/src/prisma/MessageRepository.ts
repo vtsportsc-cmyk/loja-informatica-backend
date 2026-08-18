@@ -202,26 +202,33 @@ export class PrismaMessageRepository implements IMessageRepository {
     opts?: { channel?: 'whatsapp' | 'instagram' },
   ): Promise<ConversationRecord> {
     const clean = normalizePhone(whatsappId);
-    const customer = await this.prisma.customer.upsert({
-      where: { whatsappId: clean },
-      update: name ? { name } : {},
-      create: { whatsappId: clean, name: name ?? null },
-    });
-    let conversation = await this.prisma.conversation.findUnique({
-      where: { customerId: customer.id },
-      include: { customer: true, quote: { include: { items: true } } },
-    });
-    if (!conversation) {
-      const channel = opts?.channel ?? 'whatsapp';
-      conversation = await this.prisma.conversation.create({
-        data: {
-          customerId: customer.id,
-          leadSource: channel === 'instagram' ? 'INSTAGRAM' : 'WHATSAPP_DIRECT',
-        },
+    const channel = opts?.channel ?? 'whatsapp';
+    const result = await this.prisma.$transaction(async (tx) => {
+      const customer = await tx.customer.upsert({
+        where: { whatsappId: clean },
+        update: name ? { name } : {},
+        create: { whatsappId: clean, name: name ?? null },
+      });
+      let conversation = await tx.conversation.findUnique({
+        where: { customerId: customer.id },
         include: { customer: true, quote: { include: { items: true } } },
       });
+      let created = false;
+      if (!conversation) {
+        conversation = await tx.conversation.create({
+          data: {
+            customerId: customer.id,
+            leadSource: channel === 'instagram' ? 'INSTAGRAM' : 'WHATSAPP_DIRECT',
+          },
+          include: { customer: true, quote: { include: { items: true } } },
+        });
+        created = true;
+      }
+      return { conversation, customer, created };
+    });
+    if (result.created) {
       await this.addEvent(
-        conversation.id,
+        result.conversation.id,
         'CONVERSATION_CREATED',
         channel === 'instagram' ? 'Conversa iniciada (Instagram)' : 'Conversa iniciada',
         channel === 'instagram'
@@ -229,7 +236,12 @@ export class PrismaMessageRepository implements IMessageRepository {
           : 'Cliente entrou em contato pelo WhatsApp',
       );
     }
-    return toConversationRecord(conversation, customer.name, customer.whatsappId, mapQuoteSummary(conversation.quote));
+    return toConversationRecord(
+      result.conversation,
+      result.customer.name,
+      result.customer.whatsappId,
+      mapQuoteSummary(result.conversation.quote),
+    );
   }
 
   async getConversationById(id: string): Promise<ConversationRecord | null> {
@@ -363,7 +375,6 @@ export class PrismaMessageRepository implements IMessageRepository {
   }
 
   async assume(conversationId: string, agentId: string): Promise<void> {
-    const prev = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
     await this.prisma.conversation.update({
       where: { id: conversationId },
       data: { humanMode: true, assignedAgentId: agentId, unreadCount: 0 },
@@ -374,7 +385,6 @@ export class PrismaMessageRepository implements IMessageRepository {
       'Atendimento humano iniciado',
       `Atendente ${agentId} assumiu a conversa`,
     );
-    void prev;
   }
 
   async release(conversationId: string): Promise<void> {
@@ -391,34 +401,36 @@ export class PrismaMessageRepository implements IMessageRepository {
   }
 
   async setFunnelStatus(conversationId: string, status: string): Promise<ConversationRecord> {
-    const prev = await this.prisma.conversation.findUnique({
-      where: { id: conversationId },
-      include: { customer: true, quote: { include: { items: true } } },
+    const { conv: updated, previousStatus } = await this.prisma.$transaction(async (tx) => {
+      const prev = await tx.conversation.findUnique({
+        where: { id: conversationId },
+        select: { funnelStatus: true },
+      });
+      if (!prev) throw new Error(`Conversa nao encontrada: ${conversationId}`);
+      const wasLost = prev.funnelStatus === 'CANCELADO';
+      const conv = await tx.conversation.update({
+        where: { id: conversationId },
+        data: {
+          funnelStatus: status as FunnelStatus,
+          ...(wasLost && status !== 'CANCELADO'
+            ? { lostReason: null, lostAt: null }
+            : {}),
+        },
+        include: { customer: true, quote: { include: { items: true } } },
+      });
+      return { conv, previousStatus: prev.funnelStatus };
     });
-    if (!prev) throw new Error(`Conversa nao encontrada: ${conversationId}`);
 
-    const wasLost = prev.funnelStatus === 'CANCELADO';
-    const conv = await this.prisma.conversation.update({
-      where: { id: conversationId },
-      data: {
-        funnelStatus: status as FunnelStatus,
-        ...(wasLost && status !== 'CANCELADO'
-          ? { lostReason: null, lostAt: null }
-          : {}),
-      },
-      include: { customer: true, quote: { include: { items: true } } },
-    });
-
-    if (prev.funnelStatus !== (status as FunnelStatus)) {
+    if (previousStatus !== (status as FunnelStatus)) {
       await this.addEvent(
         conversationId,
         'FUNNEL_STATUS_CHANGED',
-        `Funil: ${FUNNEL_STATUS_LABELS[prev.funnelStatus]} → ${FUNNEL_STATUS_LABELS[status as FunnelStatus]}`,
+        `Funil: ${FUNNEL_STATUS_LABELS[previousStatus]} → ${FUNNEL_STATUS_LABELS[status as FunnelStatus]}`,
         `Status atualizado para ${FUNNEL_STATUS_LABELS[status as FunnelStatus]}`,
       );
     }
 
-    return toConversationRecord(conv, conv.customer.name, conv.customer.whatsappId, mapQuoteSummary(conv.quote));
+    return toConversationRecord(updated, updated.customer.name, updated.customer.whatsappId, mapQuoteSummary(updated.quote));
   }
 
   async setLeadSource(
@@ -442,14 +454,16 @@ export class PrismaMessageRepository implements IMessageRepository {
     if (!isLostReason(lostReason)) {
       throw new Error(`motivo de perda invalido: ${lostReason}`);
     }
-    const conv = await this.prisma.conversation.update({
-      where: { id: conversationId },
-      data: {
-        funnelStatus: 'CANCELADO',
-        lostReason: lostReason as LostReason,
-        lostAt: new Date(),
-      },
-      include: { customer: true, quote: { include: { items: true } } },
+    const conv = await this.prisma.$transaction(async (tx) => {
+      return tx.conversation.update({
+        where: { id: conversationId },
+        data: {
+          funnelStatus: 'CANCELADO',
+          lostReason: lostReason as LostReason,
+          lostAt: new Date(),
+        },
+        include: { customer: true, quote: { include: { items: true } } },
+      });
     });
     await this.addEvent(
       conversationId,
@@ -598,27 +612,40 @@ export class PrismaMessageRepository implements IMessageRepository {
     conversationId: string,
     quoteCode: string,
   ): Promise<{ flagged: boolean; linked: boolean }> {
-    const conv = await this.prisma.conversation.findUnique({
-      where: { id: conversationId },
-      include: { customer: true },
-    });
-    if (!conv) return { flagged: false, linked: false };
+    const result = await this.prisma.$transaction(async (tx) => {
+      const conv = await tx.conversation.findUnique({
+        where: { id: conversationId },
+        select: { customerId: true, funnelStatus: true },
+      });
+      if (!conv) return { conv: null, linked: false, previousStatus: null as FunnelStatus | null };
 
-    const quote = await this.prisma.quote.findUnique({ where: { code: quoteCode } });
-    let linked = false;
-    if (quote && quote.customerId === conv.customerId) {
-      try {
-        await this.prisma.quote.update({
-          where: { id: quote.id },
-          data: { conversationId },
-        });
-        linked = true;
-      } catch {
-        linked = false;
+      const quote = await tx.quote.findUnique({ where: { code: quoteCode } });
+      let linked = false;
+      if (quote && quote.customerId === conv.customerId) {
+        try {
+          await tx.quote.update({
+            where: { id: quote.id },
+            data: { conversationId },
+          });
+          linked = true;
+        } catch {
+          linked = false;
+        }
       }
-    }
 
-    if (linked) {
+      let previousStatus = conv.funnelStatus;
+      if (EARLY_FUNNEL_STATUSES.has(conv.funnelStatus)) {
+        await tx.conversation.update({
+          where: { id: conversationId },
+          data: { funnelStatus: 'ALTA_VALOR', unreadCount: { increment: 1 } },
+        });
+      }
+      return { conv, linked, previousStatus };
+    });
+
+    if (!result.conv) return { flagged: false, linked: false };
+
+    if (result.linked) {
       await this.addEvent(
         conversationId,
         'QUOTE_CREATED',
@@ -627,19 +654,15 @@ export class PrismaMessageRepository implements IMessageRepository {
       );
     }
 
-    if (EARLY_FUNNEL_STATUSES.has(conv.funnelStatus)) {
-      await this.prisma.conversation.update({
-        where: { id: conversationId },
-        data: { funnelStatus: 'ALTA_VALOR', unreadCount: { increment: 1 } },
-      });
+    if (result.previousStatus && EARLY_FUNNEL_STATUSES.has(result.previousStatus)) {
       await this.addEvent(
         conversationId,
         'FUNNEL_STATUS_CHANGED',
-        `Funil: ${FUNNEL_STATUS_LABELS[conv.funnelStatus]} → Oportunidade de Alto Valor`,
+        `Funil: ${FUNNEL_STATUS_LABELS[result.previousStatus]} → Oportunidade de Alto Valor`,
         'Orçamento de alto valor detectado no WhatsApp',
       );
     }
-    return { flagged: true, linked };
+    return { flagged: true, linked: result.linked };
   }
 
   async getQuoteForConversation(conversationId: string): Promise<QuoteRecord | null> {
@@ -670,10 +693,12 @@ export class PrismaMessageRepository implements IMessageRepository {
   }
 
   async setQuoteBling(quoteId: string, blingOrderId: string, blingNumber: string): Promise<void> {
-    const quote = await this.prisma.quote.update({
-      where: { id: quoteId },
-      data: { blingOrderId, blingNumber, blingStatus: 'created' },
-      include: { conversation: true },
+    const quote = await this.prisma.$transaction(async (tx) => {
+      return tx.quote.update({
+        where: { id: quoteId },
+        data: { blingOrderId, blingNumber, blingStatus: 'created' },
+        select: { conversationId: true, code: true },
+      });
     });
     if (quote.conversationId) {
       await this.addEvent(

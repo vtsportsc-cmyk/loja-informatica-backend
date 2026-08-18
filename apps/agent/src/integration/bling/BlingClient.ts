@@ -8,6 +8,7 @@
 export interface BlingClientOptions {
   accessToken: string;
   baseURL?: string;
+  timeoutMs?: number;
   fetchImpl?: typeof fetch;
 }
 
@@ -33,11 +34,13 @@ export interface BlingCreatedOrder {
 export class BlingClient {
   private readonly accessToken: string;
   private readonly baseURL: string;
+  private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: BlingClientOptions) {
     this.accessToken = options.accessToken;
     this.baseURL = (options.baseURL ?? 'https://www.bling.com.br/Api/v3').replace(/\/$/, '');
+    this.timeoutMs = options.timeoutMs ?? 10_000;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
@@ -77,6 +80,7 @@ export class BlingClient {
         accept: 'application/json',
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
 
     if (!res.ok) {
