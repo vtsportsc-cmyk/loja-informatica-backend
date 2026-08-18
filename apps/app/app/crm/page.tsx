@@ -3,68 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { formatBRL } from '@loja/catalog';
-import {
-  FUNNEL_STATUSES,
-  FUNNEL_STATUS_LABELS,
-  FUNNEL_STATUS_COLORS,
-  FUNNEL_STATUS_PILL,
-} from '@/lib/funnel';
+import { FUNNEL_STATUSES, FUNNEL_STATUS_LABELS, FUNNEL_STATUS_PILL } from '@/lib/funnel';
 import { DEPARTMENTS, DEPARTMENT_LABELS, DEPARTMENT_COLORS, isDepartment, type Department } from '@/lib/departments';
 import { LEAD_SOURCES, LEAD_SOURCE_LABELS, LOST_REASONS, LOST_REASON_LABELS, type LeadSource, type LostReason } from '@/lib/leads';
 import { SystemHealthBadge } from '@/components/system-health';
+import { CrmKanbanView } from '@/components/crm/CrmKanban';
+import { CrmAnalytics } from '@/components/crm/CrmAnalytics';
+import type { Agent, Conversation, QuoteSummary, TimelineEvent, Note } from '@/lib/crm-types';
+import { fmtTime, fmtDate, statusPill, statusDot } from '@/lib/crm-types';
 
 type ModuleId = 'funil' | 'atendimento' | 'pedidos' | 'bi';
-
-interface Agent {
-  id: string;
-  name: string;
-  role: string | null;
-  email: string | null;
-  active: boolean;
-}
-
-interface QuoteItem {
-  sku: string | null;
-  name: string;
-  unitPriceCents: number;
-  quantity: number;
-}
-
-interface QuoteSummary {
-  code: string;
-  totalCents: number;
-  pixTotalCents: number;
-  installments: number;
-  monthlyValueCents: number;
-  parceledTotalCents: number;
-  utmSource: string | null;
-  utmMedium: string | null;
-  utmCampaign: string | null;
-  blingOrderId: string | null;
-  blingNumber: string | null;
-  blingStatus: string | null;
-  items: QuoteItem[];
-}
-
-interface Conversation {
-  id: string;
-  whatsappId: string;
-  customerName: string | null;
-  funnelStatus: string;
-  department: string | null;
-  leadSource: string | null;
-  utmSource: string | null;
-  utmMedium: string | null;
-  utmCampaign: string | null;
-  lostReason: string | null;
-  lostAt: string | null;
-  lastFollowUpAt: string | null;
-  humanMode: boolean;
-  assignedAgentId: string | null;
-  unreadCount: number;
-  lastMessageAt: string | null;
-  quote?: QuoteSummary | null;
-}
 
 interface Message {
   id: string;
@@ -72,21 +20,6 @@ interface Message {
   type: string;
   text: string | null;
   agentId: string | null;
-  createdAt: string;
-}
-
-interface TimelineEvent {
-  id: string;
-  type: string;
-  title: string;
-  detail: string | null;
-  createdAt: string;
-}
-
-interface Note {
-  id: string;
-  agentId: string | null;
-  text: string;
   createdAt: string;
 }
 
@@ -103,61 +36,6 @@ const MODULES: Array<{ id: ModuleId; label: string; hint: string }> = [
   { id: 'pedidos', label: 'Pedidos', hint: 'Orçamentos e emissão' },
   { id: 'bi', label: 'BI', hint: 'Métricas de vendas e conversão' },
 ];
-
-function fmtTime(iso: string | null): string {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-}
-
-function fmtDate(iso: string | null): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
-}
-
-/** Pill de status do funil (fallback seguro para estados desconhecidos). */
-function statusPill(status: string): string {
-  return FUNNEL_STATUS_PILL[status as keyof typeof FUNNEL_STATUS_PILL] ?? 'bg-zinc-500/10 text-zinc-400 ring-zinc-500/30';
-}
-
-function statusDot(status: string): string {
-  return FUNNEL_STATUS_COLORS[status as keyof typeof FUNNEL_STATUS_COLORS] ?? 'bg-zinc-500';
-}
-
-function SparkIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg
-      width="10"
-      height="10"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden
-      className={`shrink-0 ${className}`}
-    >
-      <path d="M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9L12 2z" />
-    </svg>
-  );
-}
-
-function ArrowUpRightIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg
-      width="10"
-      height="10"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-      className={`shrink-0 ${className}`}
-    >
-      <path d="M7 17L17 7" />
-      <path d="M8 7h9v9" />
-    </svg>
-  );
-}
 
 function SendIcon({ className = '' }: { className?: string }) {
   return (
@@ -440,52 +318,6 @@ export default function CrmPage() {
     };
   }, [orders]);
 
-  const bi = useMemo(() => {
-    const sources: Array<{ source: string; label: string; count: number }> = [];
-    for (const src of LEAD_SOURCES) {
-      const count = conversations.filter((c) => c.leadSource === src).length;
-      sources.push({ source: src, label: LEAD_SOURCE_LABELS[src], count });
-    }
-    const nullCount = conversations.filter((c) => !c.leadSource).length;
-    sources.push({ source: 'SEM_ORIGEM', label: 'Sem origem', count: nullCount });
-
-    let open = 0;
-    let closed = 0;
-    let lost = 0;
-    let openPix = 0;
-    let closedPix = 0;
-    let lostPix = 0;
-    for (const c of conversations) {
-      if (!c.quote) continue;
-      const pix = c.quote.pixTotalCents ?? 0;
-      if (c.funnelStatus === 'CONCLUIDO') {
-        closed += 1;
-        closedPix += pix;
-      } else if (c.funnelStatus === 'CANCELADO') {
-        lost += 1;
-        lostPix += pix;
-      } else {
-        open += 1;
-        openPix += pix;
-      }
-    }
-
-    const conversion = LEAD_SOURCES.map((src) => {
-      const group = conversations.filter((c) => c.leadSource === src);
-      const converted = group.filter((c) => c.funnelStatus === 'CONCLUIDO' || c.quote).length;
-      const total = group.length;
-      return {
-        source: src,
-        label: LEAD_SOURCE_LABELS[src],
-        total,
-        converted,
-        rate: total > 0 ? converted / total : 0,
-      };
-    }).filter((r) => r.total > 0);
-
-    return { sources, open, closed, lost, openPix, closedPix, lostPix, conversion };
-  }, [conversations]);
-
   return (
     <div className="flex min-h-0 flex-col gap-3 p-4 lg:h-[calc(100vh-120px)] lg:p-5">
       {/* Barra superior */}
@@ -560,40 +392,13 @@ export default function CrmPage() {
       {loading ? (
         <p className="py-16 text-center text-sm text-zinc-500">Carregando operações...</p>
       ) : module === 'funil' ? (
-        <div className="flex min-h-0 flex-1 flex-col gap-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center rounded-lg border border-night-700/70 bg-night-800/40 p-0.5">
-              <button
-                onClick={() => setViewMode('kanban')}
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
-                  viewMode === 'kanban'
-                    ? 'bg-night-700 text-white shadow-sm'
-                    : 'text-zinc-400 hover:text-zinc-100'
-                }`}
-              >
-                Kanban
-              </button>
-              <button
-                onClick={() => setViewMode('table')}
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
-                  viewMode === 'table'
-                    ? 'bg-night-700 text-white shadow-sm'
-                    : 'text-zinc-400 hover:text-zinc-100'
-                }`}
-              >
-                Tabela
-              </button>
-            </div>
-            <span className="tabular text-[10px] text-zinc-500">
-              <span className="font-semibold text-zinc-300">{conversations.length}</span> conversas
-            </span>
-          </div>
-          {viewMode === 'kanban' ? (
-            <Kanban conversations={conversations} onOpen={openConversationInChat} />
-          ) : (
-            <DenseTable conversations={conversations} agents={agents} onOpen={openConversationInChat} />
-          )}
-        </div>
+        <CrmKanbanView
+          conversations={conversations}
+          agents={agents}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          onOpen={openConversationInChat}
+        />
       ) : module === 'atendimento' ? (
         <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[300px_minmax(0,1fr)_320px]">
           <div className="surface flex min-h-0 flex-col overflow-hidden !p-0">
@@ -977,7 +782,7 @@ export default function CrmPage() {
           </div>
         </div>
       ) : module === 'bi' ? (
-        <BiSection conversations={conversations} />
+        <CrmAnalytics conversations={conversations} />
       ) : (
         <OrdersTable
           orders={orders}
@@ -1014,126 +819,11 @@ export default function CrmPage() {
   );
 }
 
-function Kanban({
-  conversations,
-  onOpen,
-}: {
-  conversations: Conversation[];
-  onOpen: (id: string) => void;
-}) {
+function SparkIcon({ className = '' }: { className?: string }) {
   return (
-    <div className="scroll-slim flex min-h-0 flex-1 gap-3 overflow-x-auto pb-1">
-      {FUNNEL_STATUSES.map((status) => {
-        const cards = conversations.filter((c) => c.funnelStatus === status);
-        const totalValue = cards.reduce((sum, c) => sum + (c.quote?.pixTotalCents ?? 0), 0);
-        return (
-          <div key={status} className="surface flex min-w-[252px] max-w-[260px] flex-col !p-0">
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-night-700/70 bg-night-900/95 px-3 py-2 backdrop-blur">
-              <div className="flex items-center gap-2">
-                <span className={`h-2 w-2 rounded-full ${statusDot(status)}`} />
-                <span className="text-xs font-semibold text-zinc-200">
-                  {FUNNEL_STATUS_LABELS[status]}
-                </span>
-              </div>
-              <span className="tabular rounded-md bg-night-800 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-400">
-                {cards.length}
-              </span>
-            </div>
-            {totalValue > 0 && (
-              <div className="border-b border-night-700/60 px-3 py-1.5">
-                <p className="tabular text-[10px] text-zinc-500">
-                  {formatBRL(totalValue)} <span className="text-zinc-600">PIX</span>
-                </p>
-              </div>
-            )}
-            <div className="scroll-slim min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
-              {cards.length === 0 && (
-                <p className="px-2 py-6 text-center text-[10px] text-zinc-600">vazio</p>
-              )}
-              {cards.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => onOpen(c.id)}
-                  className={`group w-full rounded-lg border bg-night-800/60 p-2 text-left transition-all hover:-translate-y-px hover:border-night-500 hover:bg-night-800 hover:shadow-card ${
-                    c.funnelStatus === 'ALTA_VALOR'
-                      ? 'border-rose-500/25 hover:border-rose-500/50'
-                      : 'border-night-700/70'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-xs font-semibold text-zinc-100">
-                      {c.customerName || c.whatsappId}
-                    </span>
-                    <span className="flex shrink-0 items-center gap-1">
-                      <span className="tabular text-[10px] text-zinc-500">
-                        {fmtTime(c.lastMessageAt)}
-                      </span>
-                      <ArrowUpRightIcon className="text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100" />
-                    </span>
-                  </div>
-
-                  {c.funnelStatus === 'ALTA_VALOR' && (
-                    <div className="mt-1.5 flex items-center gap-1.5">
-                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-rose-300 ring-1 ring-inset ring-rose-500/30 shadow-glow">
-                        <SparkIcon /> Alto valor
-                      </span>
-                      {c.quote && (
-                        <span className="tabular text-[10px] font-semibold text-rose-200">
-                          {formatBRL(c.quote.pixTotalCents)}
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[10px] text-zinc-400">
-                    {c.quote && c.funnelStatus !== 'ALTA_VALOR' && (
-                      <>
-                        <span className="chip font-mono !text-brand">{c.quote.code}</span>
-                        <span className="tabular font-semibold text-brand">
-                          {formatBRL(c.quote.pixTotalCents)}
-                        </span>
-                      </>
-                    )}
-                    {c.department && (
-                      <span className="chip text-zinc-500">
-                        {DEPARTMENT_LABELS[c.department as Department] ?? c.department}
-                      </span>
-                    )}
-                    {c.leadSource && (
-                      <span
-                        className={`chip ${
-                          c.leadSource === 'INSTAGRAM'
-                            ? 'bg-pink-500/10 text-pink-300 ring-pink-500/25'
-                            : c.leadSource === 'BUILDER'
-                              ? 'bg-brand/10 text-brand ring-brand/25'
-                              : 'text-zinc-400'
-                        }`}
-                      >
-                        {LEAD_SOURCE_LABELS[c.leadSource as LeadSource] ?? c.leadSource}
-                      </span>
-                    )}
-                    {c.unreadCount > 0 && (
-                      <span className="tabular rounded-full bg-red-500 px-1.5 py-px font-bold text-white">
-                        {c.unreadCount}
-                      </span>
-                    )}
-                    <span
-                      className={`ml-auto inline-flex items-center rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ring-1 ring-inset ${
-                        c.humanMode
-                          ? 'bg-brand/10 text-brand ring-brand/25'
-                          : 'bg-sky-500/10 text-sky-300 ring-sky-500/25'
-                      }`}
-                    >
-                      {c.humanMode ? 'humano' : 'IA'}
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        );
-      })}
-    </div>
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden className={`shrink-0 ${className}`}>
+      <path d="M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9L12 2z" />
+    </svg>
   );
 }
 
@@ -1326,157 +1016,6 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function BiSection({ conversations }: { conversations: Conversation[] }) {
-  const bi = useMemo(() => {
-    const sources: Array<{ source: string; label: string; count: number }> = [];
-    for (const src of LEAD_SOURCES) {
-      const count = conversations.filter((c) => c.leadSource === src).length;
-      sources.push({ source: src, label: LEAD_SOURCE_LABELS[src], count });
-    }
-    const nullCount = conversations.filter((c) => !c.leadSource).length;
-    sources.push({ source: 'SEM_ORIGEM', label: 'Sem origem', count: nullCount });
-    const totalLeads = conversations.length;
-
-    let open = 0;
-    let closed = 0;
-    let lost = 0;
-    let openPix = 0;
-    let closedPix = 0;
-    let lostPix = 0;
-    for (const c of conversations) {
-      if (!c.quote) continue;
-      const pix = c.quote.pixTotalCents ?? 0;
-      if (c.funnelStatus === 'CONCLUIDO') {
-        closed += 1;
-        closedPix += pix;
-      } else if (c.funnelStatus === 'CANCELADO') {
-        lost += 1;
-        lostPix += pix;
-      } else {
-        open += 1;
-        openPix += pix;
-      }
-    }
-
-    const conversion = LEAD_SOURCES.map((src) => {
-      const group = conversations.filter((c) => c.leadSource === src);
-      const converted = group.filter((c) => c.funnelStatus === 'CONCLUIDO' || c.quote).length;
-      const total = group.length;
-      return {
-        source: src,
-        label: LEAD_SOURCE_LABELS[src],
-        total,
-        converted,
-        rate: total > 0 ? converted / total : 0,
-      };
-    }).filter((r) => r.total > 0);
-
-    return { sources, totalLeads, open, closed, lost, openPix, closedPix, lostPix, conversion };
-  }, [conversations]);
-
-  const bar = (count: number, total: number) =>
-    total > 0 ? `${Math.round((count / total) * 100)}%` : '0%';
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
-      <div className="grid gap-3 sm:grid-cols-4">
-        <StatCard label="Total de leads" value={String(bi.totalLeads)} />
-        <StatCard label="Orçamentos abertos" value={String(bi.open)} />
-        <StatCard label="Concluídos" value={String(bi.closed)} />
-        <StatCard label="Perdidos" value={String(bi.lost)} />
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-2">
-        <div className="surface">
-          <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-            Distribuição de leads por origem
-          </h3>
-          <div className="mt-3 space-y-2.5">
-            {bi.sources.map((s) => {
-              const pct = bi.totalLeads > 0 ? (s.count / bi.totalLeads) * 100 : 0;
-              return (
-                <div key={s.source} className="flex items-center gap-2">
-                  <span className="w-32 shrink-0 truncate text-[11px] text-zinc-300">{s.label}</span>
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-night-700/60">
-                    <div
-                      className={`h-full rounded-full ${s.source === 'INSTAGRAM' ? 'bg-pink-500' : s.source === 'BUILDER' ? 'bg-brand' : s.source === 'WHATSAPP_DIRECT' ? 'bg-emerald-500' : 'bg-zinc-500'}`}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <span className="tabular w-16 shrink-0 text-right text-[11px] text-zinc-400">
-                    {s.count} <span className="text-zinc-600">({bar(s.count, bi.totalLeads)})</span>
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="surface">
-          <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-            Volume em orçamentos (abertos vs. fechados)
-          </h3>
-          <div className="mt-3 grid grid-cols-3 gap-2">
-            {[
-              { label: 'Abertos', count: bi.open, pix: bi.openPix, cls: 'text-amber-300' },
-              { label: 'Concluídos', count: bi.closed, pix: bi.closedPix, cls: 'text-emerald-300' },
-              { label: 'Perdidos', count: bi.lost, pix: bi.lostPix, cls: 'text-red-300' },
-            ].map((row) => (
-              <div key={row.label} className="rounded-lg border border-night-700/60 bg-night-800/40 p-2.5">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-zinc-500">{row.label}</p>
-                <p className={`tabular mt-0.5 text-lg font-bold ${row.cls}`}>{row.count}</p>
-                <p className="tabular text-[10px] text-zinc-400">{formatBRL(row.pix)}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="surface">
-        <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-          Taxa de conversão por canal de entrada
-        </h3>
-        {bi.conversion.length === 0 ? (
-          <p className="mt-2 text-xs text-zinc-500">Sem leads registrados ainda.</p>
-        ) : (
-          <table className="mt-2 w-full border-collapse text-xs">
-            <thead>
-              <tr>
-                <th className="table-head">Canal</th>
-                <th className="table-head text-right">Leads</th>
-                <th className="table-head text-right">Convertidos</th>
-                <th className="table-head">Taxa</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bi.conversion.map((row) => (
-                <tr key={row.source} className="border-b border-night-800/70">
-                  <td className="px-3 py-2 text-zinc-300">{row.label}</td>
-                  <td className="tabular px-3 py-2 text-right text-zinc-400">{row.total}</td>
-                  <td className="tabular px-3 py-2 text-right text-zinc-300">{row.converted}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <div className="h-1.5 w-24 overflow-hidden rounded-full bg-night-700/60">
-                        <div
-                          className="h-full rounded-full bg-emerald-500"
-                          style={{ width: `${Math.round(row.rate * 100)}%` }}
-                        />
-                      </div>
-                      <span className="tabular text-[11px] font-semibold text-zinc-300">
-                        {Math.round(row.rate * 100)}%
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
-  );
-}
-
 const TIMELINE_TYPE_META: Record<string, { label: string; color: string }> = {
   CONVERSATION_CREATED: { label: 'Conversa', color: 'bg-zinc-500' },
   QUOTE_CREATED: { label: 'Orçamento', color: 'bg-brand' },
@@ -1593,124 +1132,6 @@ function LostReasonModal({
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function DenseTable({
-  conversations,
-  agents,
-  onOpen,
-}: {
-  conversations: Conversation[];
-  agents: Agent[];
-  onOpen: (id: string) => void;
-}) {
-  const rows = useMemo(
-    () => [...conversations].sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '')),
-    [conversations],
-  );
-  const agentLabel = useCallback(
-    (id: string | null): string => {
-      if (!id) return '—';
-      return agents.find((a) => a.id === id)?.name ?? id;
-    },
-    [agents],
-  );
-
-  return (
-    <div className="surface min-h-0 flex-1 overflow-auto !p-0">
-      <table className="w-full border-collapse text-xs">
-        <thead className="sticky top-0 z-10">
-          <tr>
-            <th className="table-head">Cliente</th>
-            <th className="table-head">Telefone</th>
-            <th className="table-head">Peças Principais</th>
-            <th className="table-head">Valor PIX/Parcelado</th>
-            <th className="table-head">Status</th>
-            <th className="table-head">Atendente Responsável</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={6} className="px-3 py-10 text-center text-zinc-500">
-                Nenhuma conversa encontrada.
-              </td>
-            </tr>
-          )}
-          {rows.map((c) => {
-            const items = c.quote?.items ?? [];
-            const parts = items
-              .slice(0, 2)
-              .map((i) => `${i.quantity}x ${i.name}`)
-              .join(' · ');
-            return (
-              <tr
-                key={c.id}
-                onClick={() => onOpen(c.id)}
-                className="group cursor-pointer border-b border-night-800/70 transition-colors hover:bg-night-800/40"
-              >
-                <td className="px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot(c.funnelStatus)}`}
-                    />
-                    <span className="font-medium text-zinc-100">
-                      {c.customerName || c.whatsappId}
-                    </span>
-                    {c.quote && (
-                      <span className="font-mono text-[10px] text-brand">{c.quote.code}</span>
-                    )}
-                    {c.funnelStatus === 'ALTA_VALOR' && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 px-1.5 text-[8px] font-bold uppercase tracking-wider text-rose-300 ring-1 ring-inset ring-rose-500/30">
-                        <SparkIcon /> alto valor
-                      </span>
-                    )}
-                  </div>
-                </td>
-                <td className="tabular px-3 py-2 text-zinc-400">{c.whatsappId}</td>
-                <td className="max-w-[260px] truncate px-3 py-2 text-zinc-300">
-                  {items.length === 0 ? (
-                    <span className="text-zinc-600">—</span>
-                  ) : (
-                    <>
-                      {parts}
-                      {items.length > 2 && (
-                        <span className="text-zinc-500"> +{items.length - 2} itens</span>
-                      )}
-                    </>
-                  )}
-                </td>
-                <td className="tabular px-3 py-2">
-                  {c.quote ? (
-                    <>
-                      <span className="font-semibold text-brand">
-                        {formatBRL(c.quote.pixTotalCents)}
-                      </span>
-                      <span className="ml-1 text-[10px] text-zinc-400">
-                        ou {c.quote.installments}x {formatBRL(c.quote.monthlyValueCents)}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-zinc-600">—</span>
-                  )}
-                </td>
-                <td className="px-3 py-2">
-                  <span
-                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${statusPill(c.funnelStatus)}`}
-                  >
-                    {FUNNEL_STATUS_LABELS[c.funnelStatus as keyof typeof FUNNEL_STATUS_LABELS] ?? c.funnelStatus}
-                  </span>
-                </td>
-                <td className="tabular px-3 py-2 text-zinc-400">
-                  {agentLabel(c.assignedAgentId)}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
     </div>
   );
 }
@@ -1858,7 +1279,7 @@ function CommandPalette({
         <div className="scroll-slim max-h-[50vh] overflow-y-auto p-1.5">
           {results.length === 0 && (
             <p className="px-3 py-8 text-center text-xs text-zinc-500">
-              Nenhum resultado para “{query}”.
+              Nenhum resultado para "{query}".
             </p>
           )}
           {results.map((c, i) => {
