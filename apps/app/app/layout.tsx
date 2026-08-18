@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { Toaster } from 'sonner';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -12,6 +13,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pt-BR">
       <body className="flex min-h-screen flex-col">
+        <Toaster
+          position="bottom-right"
+          toastOptions={{
+            style: {
+              background: '#18181b',
+              border: '1px solid #3f3f46',
+              color: '#e4e4e7',
+              fontSize: '13px',
+            },
+            classNames: {
+              success: 'border-emerald-500/30',
+              error: 'border-red-500/30',
+            },
+          }}
+          richColors
+          closeButton
+        />
         <header className="sticky top-0 z-10 border-b border-night-700 bg-night-900/90 backdrop-blur">
           <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
             <Link href="/" className="flex items-center gap-2 font-bold">

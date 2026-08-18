@@ -1,6 +1,7 @@
 // Kanban do funil de vendas + tabela densa ( aba "Funil de Vendas").
 'use client';
 
+import { useMemo, useState } from 'react';
 import { formatBRL } from '@loja/catalog';
 import { FUNNEL_STATUSES, FUNNEL_STATUS_LABELS } from '@/lib/funnel';
 import { DEPARTMENT_LABELS, type Department } from '@/lib/departments';
@@ -204,31 +205,73 @@ export function CrmKanbanView({
   onViewModeChange: (mode: 'kanban' | 'table') => void;
   onOpen: (id: string) => void;
 }) {
+  const [agentFilter, setAgentFilter] = useState<string>('todos');
+  const [statusFilter, setStatusFilter] = useState<string>('todos');
+
+  const filtered = useMemo(() => {
+    return conversations.filter((c) => {
+      const matchesAgent =
+        agentFilter === 'todos' ||
+        (agentFilter === 'sem-atendente' && !c.assignedAgentId) ||
+        c.assignedAgentId === agentFilter;
+      const matchesStatus =
+        statusFilter === 'todos' || c.funnelStatus === statusFilter;
+      return matchesAgent && matchesStatus;
+    });
+  }, [conversations, agentFilter, statusFilter]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center rounded-lg border border-night-700/70 bg-night-800/40 p-0.5">
-          <button
-            onClick={() => onViewModeChange('kanban')}
-            className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${viewMode === 'kanban' ? 'bg-night-700 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-100'}`}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center rounded-lg border border-night-700/70 bg-night-800/40 p-0.5">
+            <button
+              onClick={() => onViewModeChange('kanban')}
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${viewMode === 'kanban' ? 'bg-night-700 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-100'}`}
+            >
+              Kanban
+            </button>
+            <button
+              onClick={() => onViewModeChange('table')}
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${viewMode === 'table' ? 'bg-night-700 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-100'}`}
+            >
+              Tabela
+            </button>
+          </div>
+          <select
+            className="select !py-1 !text-[11px]"
+            value={agentFilter}
+            onChange={(e) => setAgentFilter(e.target.value)}
           >
-            Kanban
-          </button>
-          <button
-            onClick={() => onViewModeChange('table')}
-            className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${viewMode === 'table' ? 'bg-night-700 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-100'}`}
+            <option value="todos">Todos agentes</option>
+            <option value="sem-atendente">Sem atendente</option>
+            {agents.map((a) => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+          <select
+            className="select !py-1 !text-[11px]"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
           >
-            Tabela
-          </button>
+            <option value="todos">Todos status</option>
+            {FUNNEL_STATUSES.map((s) => (
+              <option key={s} value={s}>{FUNNEL_STATUS_LABELS[s]}</option>
+            ))}
+          </select>
         </div>
         <span className="tabular text-[10px] text-zinc-500">
-          <span className="font-semibold text-zinc-300">{conversations.length}</span> conversas
+          <span className="font-semibold text-zinc-300">{filtered.length}</span>
+          {filtered.length !== conversations.length && (
+            <span className="text-zinc-600">/{conversations.length}</span>
+          )}{' '}
+          conversas
         </span>
       </div>
       {viewMode === 'kanban' ? (
-        <Kanban conversations={conversations} onOpen={onOpen} />
+        <Kanban conversations={filtered} onOpen={onOpen} />
       ) : (
-        <DenseTable conversations={conversations} agents={agents} onOpen={onOpen} />
+        <DenseTable conversations={filtered} agents={agents} onOpen={onOpen} />
       )}
     </div>
   );

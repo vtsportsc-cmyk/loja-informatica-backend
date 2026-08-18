@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { toast } from 'sonner';
 import { formatBRL } from '@loja/catalog';
 import type { QuoteItemJson } from '@/lib/quotes-store';
 
@@ -124,6 +125,18 @@ export default function QuotePage() {
             Confirmar no WhatsApp
           </a>
         )}
+        <button
+          className="btn-ghost mt-2 w-full border border-night-600 text-xs"
+          onClick={() => {
+            const url = window.location.href;
+            navigator.clipboard.writeText(url).then(
+              () => toast.success('Link copiado!', { description: url }),
+              () => toast.error('Falha ao copiar link'),
+            );
+          }}
+        >
+          Copiar link do orçamento
+        </button>
       </div>
 
       <Link href="/builder" className="btn-ghost mt-4">

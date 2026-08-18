@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import {
   CATEGORY_LABELS,
   formatBRL,
@@ -12,6 +13,7 @@ import {
 } from '@loja/catalog';
 import type { BuildSelection, CategoryId, HardwareProduct } from '@loja/catalog';
 import type { QuoteItemJson } from '@/lib/quotes-store';
+import { formatPhoneBR, isValidPhoneBR } from '@/lib/phone';
 
 interface ProductsResponse {
   categories: Array<{ id: CategoryId; label: string }>;
@@ -106,6 +108,12 @@ export default function BuilderPage() {
   const monthlyValueCents = Math.round(parceledTotalCents / MAX_INSTALLMENTS);
 
   async function generateQuote() {
+    if (customerPhone && !isValidPhoneBR(customerPhone)) {
+      toast.error('Número de telefone inválido', {
+        description: 'Use o formato: (11) 99999-9999',
+      });
+      return;
+    }
     setGenerating(true);
     setError(null);
     try {
@@ -124,7 +132,7 @@ export default function BuilderPage() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           customerName,
-          customerPhone,
+          customerPhone: customerPhone || undefined,
           items,
           utmSource: utm?.source ?? null,
           utmMedium: utm?.medium ?? null,
@@ -134,8 +142,13 @@ export default function BuilderPage() {
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? 'falha ao gerar orçamento');
       setResult(body);
+      toast.success('Orçamento gerado!', {
+        description: `Código: ${body.quote.code}`,
+      });
     } catch (err) {
-      setError((err as Error).message);
+      const msg = (err as Error).message;
+      setError(msg);
+      toast.error('Erro ao gerar orçamento', { description: msg });
     } finally {
       setGenerating(false);
     }
@@ -301,6 +314,10 @@ export default function BuilderPage() {
                 placeholder="WhatsApp com DDD (opcional)"
                 value={customerPhone}
                 onChange={(e) => setCustomerPhone(e.target.value)}
+                onBlur={(e) => {
+                  const formatted = formatPhoneBR(e.target.value);
+                  if (formatted) setCustomerPhone(formatted);
+                }}
               />
               <button
                 className="btn-primary w-full"
@@ -334,6 +351,18 @@ export default function BuilderPage() {
               >
                 Enviar pelo WhatsApp
               </a>
+              <button
+                className="btn-ghost mt-2 w-full border border-night-600 text-xs"
+                onClick={() => {
+                  const url = `${window.location.origin}/quote/${result.quote.code}`;
+                  navigator.clipboard.writeText(url).then(
+                    () => toast.success('Link copiado!', { description: url }),
+                    () => toast.error('Falha ao copiar link'),
+                  );
+                }}
+              >
+                Copiar link do orçamento
+              </button>
               <p className="mt-2 text-center text-xs text-zinc-500">
                 Link do orçamento: <span className="font-mono">/quote/{result.quote.code}</span>
               </p>

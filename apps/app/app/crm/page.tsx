@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { toast } from 'sonner';
 import { formatBRL } from '@loja/catalog';
 import { FUNNEL_STATUSES, FUNNEL_STATUS_LABELS, FUNNEL_STATUS_PILL } from '@/lib/funnel';
 import { DEPARTMENTS, DEPARTMENT_LABELS, DEPARTMENT_COLORS, isDepartment, type Department } from '@/lib/departments';
@@ -79,6 +80,9 @@ export default function CrmPage() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<'resumo' | 'anotacoes'>('resumo');
   const [noteDraft, setNoteDraft] = useState('');
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [typing, setTyping] = useState(false);
 
   useEffect(() => {
     setAgentName(localStorage.getItem('crm-agent-name') ?? '');
@@ -132,6 +136,15 @@ export default function CrmPage() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const timer = setInterval(() => {
+      void refreshList();
+      if (selectedId) void openConversation(selectedId);
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [autoRefresh, refreshList, selectedId, openConversation]);
+
   async function openConversationInChat(id: string) {
     setModule('atendimento');
     await openConversation(id);
@@ -139,24 +152,34 @@ export default function CrmPage() {
 
   async function sendMessage() {
     if (!selectedId || !draft.trim()) return;
-    const res = await fetch('/api/crm/messages', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ conversationId: selectedId, agentId: agentName || null, text: draft.trim() }),
-    });
-    if (res.ok) {
-      setDraft('');
-      await openConversation(selectedId);
-    } else {
-      const body = await res.json().catch(() => ({}));
-      setError(body.error ?? 'falha ao enviar mensagem');
+    setSending(true);
+    setTyping(true);
+    try {
+      const res = await fetch('/api/crm/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ conversationId: selectedId, agentId: agentName || null, text: draft.trim() }),
+      });
+      if (res.ok) {
+        setDraft('');
+        await openConversation(selectedId);
+        toast.success('Mensagem enviada');
+      } else {
+        const body = await res.json().catch(() => ({}));
+        toast.error('Falha ao enviar', { description: body.error ?? 'Erro desconhecido' });
+      }
+    } catch {
+      toast.error('Falha ao enviar mensagem');
+    } finally {
+      setSending(false);
+      setTimeout(() => setTyping(false), 1500);
     }
   }
 
   async function handoff(action: 'assume' | 'release') {
     if (!selectedId) return;
     if (action === 'assume' && !agentName.trim()) {
-      setError('informe seu nome (agente) para assumir o atendimento');
+      toast.error('Informe seu nome para assumir o atendimento');
       return;
     }
     const res = await fetch(`/api/crm/conversations/${encodeURIComponent(selectedId)}/handoff`, {
@@ -165,11 +188,12 @@ export default function CrmPage() {
       body: JSON.stringify({ action, agentId: agentName.trim() || undefined }),
     });
     if (res.ok) {
+      toast.success(action === 'assume' ? 'Atendimento assumido' : 'Atendimento liberado para IA');
       await openConversation(selectedId);
       await refreshList();
     } else {
       const body = await res.json().catch(() => ({}));
-      setError(body.error ?? 'falha ao alternar o atendimento');
+      toast.error('Falha ao alternar atendimento', { description: body.error });
     }
   }
 
@@ -185,11 +209,12 @@ export default function CrmPage() {
       body: JSON.stringify({ status: statusDraft }),
     });
     if (res.ok) {
+      toast.success('Status atualizado');
       await openConversation(selectedId);
       await refreshList();
     } else {
       const body = await res.json().catch(() => ({}));
-      setError(body.error ?? 'falha ao atualizar o funil');
+      toast.error('Falha ao atualizar o funil', { description: body.error });
     }
   }
 
@@ -203,12 +228,12 @@ export default function CrmPage() {
     const id = pendingLostId;
     setPendingLostId(null);
     if (res.ok) {
-      setError(null);
+      toast.success('Lead marcado como perdido');
       await openConversation(id);
       await refreshList();
     } else {
       const body = await res.json().catch(() => ({}));
-      setError(body.error ?? 'falha ao marcar como perdido');
+      toast.error('Falha ao marcar como perdido', { description: body.error });
     }
   }
 
@@ -220,12 +245,12 @@ export default function CrmPage() {
       body: JSON.stringify({ leadSource: leadSourceDraft === 'none' ? null : leadSourceDraft }),
     });
     if (res.ok) {
-      setError(null);
+      toast.success('Origem do lead salva');
       await openConversation(selectedId);
       await refreshList();
     } else {
       const body = await res.json().catch(() => ({}));
-      setError(body.error ?? 'falha ao salvar a origem do lead');
+      toast.error('Falha ao salvar a origem', { description: body.error });
     }
   }
 
@@ -238,11 +263,11 @@ export default function CrmPage() {
     });
     if (res.ok) {
       setNoteDraft('');
-      setError(null);
+      toast.success('Anotação salva');
       await openConversation(selectedId);
     } else {
       const body = await res.json().catch(() => ({}));
-      setError(body.error ?? 'falha ao salvar a anotação');
+      toast.error('Falha ao salvar anotação', { description: body.error });
     }
   }
 
@@ -260,11 +285,12 @@ export default function CrmPage() {
       },
     );
     if (res.ok) {
+      toast.success('Departamento salvo');
       await openConversation(selectedId);
       await refreshList();
     } else {
       const body = await res.json().catch(() => ({}));
-      setError(body.error ?? 'falha ao atribuir departamento');
+      toast.error('Falha ao atribuir departamento', { description: body.error });
     }
   }
 
@@ -275,11 +301,11 @@ export default function CrmPage() {
       body: JSON.stringify({ status: 'AGUARDANDO_NF' }),
     });
     if (res.ok) {
-      setError(null);
+      toast.success('Pedido emitido — aguardando NF');
       await refreshList();
     } else {
       const body = await res.json().catch(() => ({}));
-      setError(body.error ?? 'falha ao emitir o pedido');
+      toast.error('Falha ao emitir pedido', { description: body.error });
     }
   }
 
@@ -372,6 +398,13 @@ export default function CrmPage() {
           </div>
           <button className="btn-ghost !px-2.5 !py-1.5 !text-xs" onClick={() => void refreshList()}>
             Atualizar
+          </button>
+          <button
+            className={`btn-ghost !px-2.5 !py-1.5 !text-xs ${autoRefresh ? 'text-emerald-400' : 'text-zinc-500'}`}
+            onClick={() => setAutoRefresh(!autoRefresh)}
+            title={autoRefresh ? 'Auto-refresh: 15s (clique para desativar)' : 'Auto-refresh desativado'}
+          >
+            {autoRefresh ? '● AO VIVO' : '○ PAUSADO'}
           </button>
           <SystemHealthBadge />
         </div>
@@ -597,6 +630,16 @@ export default function CrmPage() {
                 </div>
 
                 <div className="border-t border-night-700/70 bg-night-900/80 p-3 backdrop-blur">
+                  {typing && (
+                    <div className="mb-2 flex items-center gap-1.5 text-[11px] text-zinc-500">
+                      <span className="flex gap-0.5">
+                        <span className="h-1 w-1 animate-bounce rounded-full bg-brand/60 [animation-delay:0ms]" />
+                        <span className="h-1 w-1 animate-bounce rounded-full bg-brand/60 [animation-delay:150ms]" />
+                        <span className="h-1 w-1 animate-bounce rounded-full bg-brand/60 [animation-delay:300ms]" />
+                      </span>
+                      Enviando mensagem...
+                    </div>
+                  )}
                   <div className="flex gap-2">
                     <input
                       className="input !py-1.5 !text-xs"
@@ -604,16 +647,16 @@ export default function CrmPage() {
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') void sendMessage();
+                        if (e.key === 'Enter' && !sending) void sendMessage();
                       }}
+                      disabled={sending}
                     />
                     <button
                       className="btn-primary shrink-0 !px-3 !py-1.5 !text-xs"
-                      disabled={!draft.trim()}
+                      disabled={!draft.trim() || sending}
                       onClick={() => void sendMessage()}
                     >
-                      <SendIcon />
-                      Enviar
+                      {sending ? '...' : <SendIcon />}
                     </button>
                   </div>
                 </div>
