@@ -78,6 +78,8 @@ services:
       AGENT_API_URL: "http://agent:3000"
       AGENT_API_KEY: "${AGENT_API_KEY:-dev_agent_key}"
       STORE_WHATSAPP_NUMBER: "${STORE_WHATSAPP_NUMBER:-5511999990000}"
+      CRM_PANEL_USERNAME: "${CRM_PANEL_USERNAME:-admin}"
+      CRM_PANEL_PASSWORD: "${CRM_PANEL_PASSWORD:-admin}"
     ports:
       - "${APP_PORT:-3001}:3000"
     depends_on:
