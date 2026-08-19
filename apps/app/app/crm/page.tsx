@@ -3,6 +3,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { toast } from 'sonner';
+import {
+  Bot,
+  Box,
+  CircleCheckBig,
+  CircuitBoard,
+  Command,
+  Copy,
+  Cpu,
+  Fan,
+  Gpu,
+  HardDrive,
+  LayoutDashboard,
+  MemoryStick,
+  MessageSquare,
+  Monitor,
+  Package,
+  QrCode,
+  RefreshCw,
+  Search,
+  Send,
+  ShieldCheck,
+  Tag,
+  Zap,
+} from 'lucide-react';
 import { formatBRL } from '@loja/catalog';
 import { FUNNEL_STATUSES, FUNNEL_STATUS_LABELS } from '@/lib/funnel';
 import { DEPARTMENTS, DEPARTMENT_LABELS, DEPARTMENT_COLORS, isDepartment, type Department } from '@/lib/departments';
@@ -11,7 +35,7 @@ import { formatPhoneBR } from '@/lib/phone';
 import { SystemHealthBadge } from '@/components/system-health';
 import { CrmKanbanView } from '@/components/crm/CrmKanban';
 import { CrmAnalytics } from '@/components/crm/CrmAnalytics';
-import { CrmDashboard } from '@/components/crm/CrmDashboard';
+import { CrmDashboard, SegmentedControl } from '@/components/crm/CrmDashboard';
 import type { Agent, Conversation, QuoteSummary, TimelineEvent, Note } from '@/lib/crm-types';
 import { fmtTime, fmtDate, statusPill, statusDot } from '@/lib/crm-types';
 
@@ -82,69 +106,33 @@ function avatarColor(id: string): string {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
-function SendIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 ${className}`}>
-      <path d="M22 2L11 13" />
-      <path d="M22 2l-7 20-4-9-9-4 20-7z" />
-    </svg>
-  );
+/**
+ * Anel de presenca do avatar, derivado do `lastMessageAt` real da conversa
+ * (o WhatsApp nao expoe presence online/offline via webhook): verde pulsante
+ * para atividade nos ultimos 5min, ambar para a ultima hora, cinza p/ o resto.
+ */
+function presenceRing(lastMessageAt: string | null): { dot: string; pulse: boolean; label: string } {
+  if (!lastMessageAt) return { dot: 'bg-zinc-600', pulse: false, label: 'Sem atividade recente' };
+  const diff = Date.now() - new Date(lastMessageAt).getTime();
+  if (diff < 5 * 60 * 1000) return { dot: 'bg-emerald-400', pulse: true, label: 'Ativo agora' };
+  if (diff < 60 * 60 * 1000) return { dot: 'bg-amber-400', pulse: false, label: 'Ativo na última hora' };
+  return { dot: 'bg-zinc-600', pulse: false, label: 'Inativo' };
 }
 
-function CopyIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 ${className}`}>
-      <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
-      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-    </svg>
-  );
-}
-
-function QrCodeIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 ${className}`}>
-      <rect width="5" height="5" x="3" y="3" rx="1" />
-      <rect width="5" height="5" x="16" y="3" rx="1" />
-      <rect width="5" height="5" x="3" y="16" rx="1" />
-      <path d="M21 16h-3a2 2 0 0 0-2 2v3" />
-      <path d="M21 21v.01" />
-      <path d="M12 7v3a2 2 0 0 1-2 2H7" />
-      <path d="M3 12h.01" />
-      <path d="M12 3h.01" />
-      <path d="M12 16v.01" />
-      <path d="M16 12h1" />
-      <path d="M21 12v.01" />
-      <path d="M12 21v-1" />
-    </svg>
-  );
-}
-
-function BotIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 ${className}`}>
-      <path d="M12 8V4H8" />
-      <rect width="16" height="12" x="4" y="8" rx="2" />
-      <path d="M2 14h2" /><path d="M20 14h2" />
-      <path d="M15 13v2" /><path d="M9 13v2" />
-    </svg>
-  );
-}
-
-function MessageSquareIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 ${className}`}>
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-function TagIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 ${className}`}>
-      <path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z" />
-      <path d="M7 7h.01" />
-    </svg>
-  );
+/** Mapeia o nome do item do orcamento para um icone tecnico (heuristica por palavra-chave). */
+function partIcon(name: string): React.ReactNode {
+  const n = name.toLowerCase();
+  const cls = 'h-3.5 w-3.5';
+  if (/(rtx|gtx|radeon|placa de v[ií]deo|geforce)/.test(n)) return <Gpu className={cls} strokeWidth={2} />;
+  if (/(ryzen|intel core|i[3579]-|processador)/.test(n)) return <Cpu className={cls} strokeWidth={2} />;
+  if (/(mem[oó]ria|\bram\b|ddr[345])/.test(n)) return <MemoryStick className={cls} strokeWidth={2} />;
+  if (/(ssd|nvme|\bhd\b|armazenamento|disco)/.test(n)) return <HardDrive className={cls} strokeWidth={2} />;
+  if (/(fonte|\bpsu\b|\bfnte\b)/.test(n)) return <Zap className={cls} strokeWidth={2} />;
+  if (/(gabinete|\bcase\b)/.test(n)) return <Box className={cls} strokeWidth={2} />;
+  if (/(water\s?cooler|\bcooler\b|\bfan\b)/.test(n)) return <Fan className={cls} strokeWidth={2} />;
+  if (/(placa[- ]m[ãa]e|motherboard)/.test(n)) return <CircuitBoard className={cls} strokeWidth={2} />;
+  if (/(monitor)/.test(n)) return <Monitor className={cls} strokeWidth={2} />;
+  return <Package className={cls} strokeWidth={2} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,14 +173,19 @@ export default function CrmPage() {
   }, []);
 
   const refreshList = useCallback(async () => {
-    const res = await fetch('/api/crm/conversations');
-    const body = await res.json();
-    if (!res.ok) {
-      setError(body.error ?? 'falha ao listar conversas');
-      return;
+    try {
+      const res = await fetch('/api/crm/conversations');
+      const body = await res.json();
+      if (!res.ok) {
+        setError(body.error ?? 'falha ao listar conversas');
+        return;
+      }
+      setConversations(body.items ?? body.conversations ?? []);
+    } catch {
+      setError('falha ao listar conversas (rede)');
+    } finally {
+      setLoading(false);
     }
-    setConversations(body.items ?? body.conversations ?? []);
-    setLoading(false);
   }, []);
 
   const refreshAgents = useCallback(async () => {
@@ -451,8 +444,8 @@ export default function CrmPage() {
   return (
     <div className="flex min-h-0 flex-col gap-3 p-4 lg:h-[calc(100vh-120px)] lg:p-5">
       {/* ─── Top Bar ─── */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-4">
+      <div className="glass flex flex-wrap items-center justify-between gap-3 !rounded-xl px-4 py-3">
+        <div className="flex flex-wrap items-center gap-4">
           <div>
             <h1 className="text-lg font-bold tracking-tight text-zinc-50">Painel de Operações</h1>
             <p className="text-[11px] text-zinc-500">
@@ -461,7 +454,7 @@ export default function CrmPage() {
                 : 'Workstation de atendimento multi-atendente'}
             </p>
           </div>
-          <nav className="flex rounded-lg border border-night-700/70 bg-night-800/40 p-0.5">
+          <nav className="flex rounded-lg border border-zinc-800/60 bg-night-800/40 p-0.5">
             {MODULES.map((m) => (
               <button
                 key={m.id}
@@ -478,52 +471,31 @@ export default function CrmPage() {
             ))}
           </nav>
           {module === 'atendimento' && (
-            <div className="flex rounded-lg border border-night-700/70 bg-night-800/40 p-0.5">
-              <button
-                onClick={() => setCrmView('workstation')}
-                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-semibold transition-all ${
-                  crmView === 'workstation'
-                    ? 'bg-night-700 text-white shadow-sm'
-                    : 'text-zinc-400 hover:text-zinc-100'
-                }`}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
-                Workstation
-              </button>
-              <button
-                onClick={() => setCrmView('dashboard')}
-                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-semibold transition-all ${
-                  crmView === 'dashboard'
-                    ? 'bg-night-700 text-white shadow-sm'
-                    : 'text-zinc-400 hover:text-zinc-100'
-                }`}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <rect width="7" height="9" x="3" y="3" rx="1" />
-                  <rect width="7" height="5" x="14" y="3" rx="1" />
-                  <rect width="7" height="9" x="14" y="12" rx="1" />
-                  <rect width="7" height="5" x="3" y="16" rx="1" />
-                </svg>
-                Dashboard
-              </button>
-            </div>
+            <SegmentedControl
+              value={crmView}
+              onChange={setCrmView}
+              options={[
+                { value: 'workstation', label: 'Workstation', icon: <MessageSquare className="h-3 w-3" strokeWidth={2} /> },
+                { value: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-3 w-3" strokeWidth={2} /> },
+              ]}
+            />
           )}
         </div>
         <div className="flex items-center gap-2">
           <button
-            className="btn-ghost hidden items-center gap-2 !px-2.5 !py-1.5 !text-xs sm:flex"
+            className="btn-ghost hidden items-center gap-2 !border-zinc-800/60 !px-2.5 !py-1.5 !text-xs sm:flex"
             onClick={() => setPaletteOpen(true)}
             title="Busca rápida (Ctrl+K)"
           >
-            <SearchIcon />
+            <Search className="h-3.5 w-3.5" strokeWidth={2} />
             <span>Buscar</span>
-            <kbd className="rounded border border-night-600 bg-night-800 px-1 font-mono text-[9px] text-zinc-500">Ctrl+K</kbd>
+            <kbd className="flex items-center gap-0.5 rounded border border-night-600 bg-night-800 px-1 font-mono text-[9px] text-zinc-500">
+              <Command className="h-2.5 w-2.5" strokeWidth={2.5} />K
+            </kbd>
           </button>
           <div className="relative">
             <input
-              className="input w-44 !py-1.5 !text-xs"
+              className="input w-44 !border-zinc-800/60 !py-1.5 !text-xs"
               placeholder="Seu nome (agente)"
               value={agentName}
               onChange={(e) => {
@@ -533,13 +505,16 @@ export default function CrmPage() {
             />
             {agentName && <span className="pointer-events-none absolute right-2 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-brand" />}
           </div>
-          <button className="btn-ghost !px-2.5 !py-1.5 !text-xs" onClick={() => void refreshList()}>Atualizar</button>
+          <button className="btn-ghost !border-zinc-800/60 !px-2.5 !py-1.5 !text-xs" onClick={() => void refreshList()} title="Atualizar lista">
+            <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} />
+          </button>
           <button
-            className={`btn-ghost !px-2.5 !py-1.5 !text-xs ${autoRefresh ? 'text-emerald-400' : 'text-zinc-500'}`}
+            className={`btn-ghost inline-flex items-center gap-1.5 !border-zinc-800/60 !px-2.5 !py-1.5 !text-xs ${autoRefresh ? 'text-emerald-400' : 'text-zinc-500'}`}
             onClick={() => setAutoRefresh(!autoRefresh)}
             title={autoRefresh ? 'Auto-refresh: 15s' : 'Auto-refresh desativado'}
           >
-            {autoRefresh ? '● AO VIVO' : '○ PAUSADO'}
+            <span className={`h-1.5 w-1.5 rounded-full ${autoRefresh ? 'status-ring-online bg-emerald-400' : 'bg-zinc-600'}`} />
+            {autoRefresh ? 'AO VIVO' : 'PAUSADO'}
           </button>
           <SystemHealthBadge />
         </div>
@@ -590,26 +565,29 @@ export default function CrmPage() {
         /* ═══════════════════════════════════════════════════════════════
            WORKSTATION 3 COLUNAS
            ═══════════════════════════════════════════════════════════════ */
-        <div className="grid min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border border-night-700/70 lg:grid-cols-[320px_minmax(0,1fr)_340px]">
+        <div className="glass grid min-h-0 flex-1 gap-0 overflow-hidden !rounded-xl lg:grid-cols-[320px_minmax(0,1fr)_340px]">
 
           {/* ── COLUNA 1: Conversas & Filtros ── */}
-          <div className="flex min-h-0 flex-col border-r border-night-700/50 bg-night-900/60">
+          <div className="flex min-h-0 flex-col border-r border-zinc-800/50 bg-night-900/50">
             {/* Search + Filters */}
-            <div className="border-b border-night-700/50 p-2.5">
+            <div className="border-b border-zinc-800/50 p-2.5">
               <div className="relative">
                 <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500">
-                  <SearchIcon />
+                  <Search className="h-3.5 w-3.5" strokeWidth={2} />
                 </span>
                 <input
-                  className="input !py-1.5 !pl-8 !text-xs"
+                  className="input !border-zinc-800/60 !py-1.5 !pl-8 !pr-12 !text-xs"
                   placeholder="Buscar por nome, telefone ou orçamento..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
+                <kbd className="pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded border border-night-600 bg-night-800/80 px-1 font-mono text-[9px] text-zinc-500">
+                  <Command className="h-2.5 w-2.5" strokeWidth={2.5} />K
+                </kbd>
               </div>
               <div className="mt-2 flex items-center gap-1.5">
                 <select
-                  className="select !py-1 !text-[11px]"
+                  className="select !border-zinc-800/60 !py-1 !text-[11px]"
                   value={departmentFilter}
                   onChange={(e) => setDepartmentFilter(e.target.value)}
                 >
@@ -632,21 +610,25 @@ export default function CrmPage() {
               )}
               {filtered.map((c) => {
                 const badge = statusBadge(c);
+                const presence = presenceRing(c.lastMessageAt);
                 return (
                   <button
                     key={c.id}
                     onClick={() => void openConversation(c.id)}
-                    className={`group flex w-full items-start gap-2.5 border-b border-night-800/50 px-3 py-2.5 text-left transition-all ${
+                    className={`group flex w-full items-start gap-2.5 border-b border-zinc-800/40 px-3 py-2.5 text-left transition-all ${
                       selectedId === c.id
                         ? 'border-l-2 border-l-brand bg-night-800/60'
                         : 'border-l-2 border-l-transparent hover:bg-night-800/30'
                     }`}
                   >
                     {/* Avatar */}
-                    <div className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white ${avatarColor(c.id)}`}>
-                      {getInitials(c.customerName, c.whatsappId)}
+                    <div className="relative shrink-0">
+                      <div className={`flex h-9 w-9 items-center justify-center rounded-full text-[11px] font-bold text-white ${avatarColor(c.id)}`}>
+                        {getInitials(c.customerName, c.whatsappId)}
+                      </div>
+                      <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-night-900 ${presence.dot} ${presence.pulse ? 'status-ring-online' : ''}`} title={presence.label} />
                       {c.unreadCount > 0 && (
-                        <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[8px] font-bold text-white">
+                        <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[8px] font-bold text-white ring-2 ring-night-900">
                           {c.unreadCount}
                         </span>
                       )}
@@ -667,7 +649,7 @@ export default function CrmPage() {
                           {badge.label}
                         </span>
                         {c.department && (
-                          <span className="chip !py-px !text-[8px]">{DEPARTMENT_LABELS[c.department as Department] ?? c.department}</span>
+                          <span className="chip !border-zinc-800/60 !py-px !text-[8px]">{DEPARTMENT_LABELS[c.department as Department] ?? c.department}</span>
                         )}
                       </div>
                     </div>
@@ -681,8 +663,8 @@ export default function CrmPage() {
           <div className="flex min-h-0 flex-col bg-night-950/30">
             {!selected ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-3 text-zinc-500">
-                <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-night-700/50 bg-night-800/30">
-                  <MessageSquareIcon className="h-7 w-7 text-zinc-600" />
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-zinc-800/50 bg-night-800/30">
+                  <MessageSquare className="h-7 w-7 text-zinc-600" strokeWidth={1.75} />
                 </div>
                 <div className="text-center">
                   <p className="text-sm font-medium text-zinc-400">Nenhuma conversa selecionada</p>
@@ -692,10 +674,13 @@ export default function CrmPage() {
             ) : (
               <>
                 {/* Chat Header */}
-                <div className="flex items-center justify-between gap-2 border-b border-night-700/50 bg-night-900/80 px-4 py-2.5 backdrop-blur">
+                <div className="flex items-center justify-between gap-2 border-b border-zinc-800/50 bg-night-900/80 px-4 py-2.5 backdrop-blur">
                   <div className="flex min-w-0 items-center gap-3">
-                    <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${avatarColor(selected.id)}`}>
-                      {getInitials(selected.customerName, selected.whatsappId)}
+                    <div className="relative shrink-0">
+                      <div className={`flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold text-white ${avatarColor(selected.id)}`}>
+                        {getInitials(selected.customerName, selected.whatsappId)}
+                      </div>
+                      <span className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border-2 border-night-900 ${presenceRing(selected.lastMessageAt).dot}`} />
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
@@ -714,11 +699,11 @@ export default function CrmPage() {
                   <div className="flex shrink-0 items-center gap-1.5">
                     {selected.humanMode ? (
                       <button
-                        className="btn-ghost !px-2.5 !py-1 !text-[11px]"
+                        className="btn-ghost !border-zinc-800/60 !px-2.5 !py-1 !text-[11px]"
                         onClick={() => void handoff('release')}
                         title="Liberar para a IA"
                       >
-                        <BotIcon /> Liberar p/ IA
+                        <Bot className="h-3 w-3" strokeWidth={2} /> Liberar p/ IA
                       </button>
                     ) : (
                       <button
@@ -736,8 +721,8 @@ export default function CrmPage() {
                 <div className="scroll-slim min-h-0 flex-1 space-y-2 overflow-y-auto p-4">
                   {detail?.messages.length === 0 && (
                     <div className="flex flex-col items-center justify-center py-12 text-center">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-night-700/50 bg-night-800/30">
-                        <MessageSquareIcon className="h-5 w-5 text-zinc-600" />
+                      <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-zinc-800/50 bg-night-800/30">
+                        <MessageSquare className="h-5 w-5 text-zinc-600" strokeWidth={1.75} />
                       </div>
                       <p className="mt-3 text-xs text-zinc-500">Sem mensagens ainda.</p>
                     </div>
@@ -748,29 +733,38 @@ export default function CrmPage() {
                       className={`flex ${m.direction === 'inbound' ? 'justify-start' : 'justify-end'}`}
                     >
                       <div
-                        className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-xs shadow-sm ${
+                        className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-xs shadow-sm shadow-black/10 ${
                           m.direction === 'inbound'
-                            ? 'rounded-tl-md border border-night-700/70 bg-night-800/80 text-zinc-100'
-                            : 'rounded-tr-md border border-brand/20 bg-brand/10 text-zinc-50'
+                            ? 'rounded-tl-md border border-zinc-800/60 bg-night-800/80 text-zinc-100'
+                            : 'rounded-tr-md border border-brand/20 bg-gradient-to-br from-brand/15 to-brand/5 text-zinc-50'
                         }`}
                       >
                         <p className="whitespace-pre-wrap leading-relaxed">{m.text}</p>
-                        <p className={`mt-1 text-[9px] ${m.direction === 'inbound' ? 'text-zinc-500' : 'text-brand/60'}`}>
+                        <p className={`mt-1 text-[9px] ${m.direction === 'inbound' ? 'text-zinc-500' : 'text-brand/70'}`}>
                           {m.direction === 'inbound' ? 'cliente' : m.agentId ? m.agentId : 'IA'} ·{' '}
                           {fmtTime(m.createdAt)}
                         </p>
                       </div>
                     </div>
                   ))}
+                  {typing && (
+                    <div className="flex justify-end">
+                      <div className="flex items-center gap-1 rounded-2xl rounded-tr-md border border-brand/20 bg-brand/10 px-3 py-2.5">
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-brand/70 [animation-delay:0ms]" />
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-brand/70 [animation-delay:150ms]" />
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-brand/70 [animation-delay:300ms]" />
+                      </div>
+                    </div>
+                  )}
                   <div ref={chatEndRef} />
                 </div>
 
                 {/* Quick Actions Bar */}
                 {selected && (
-                  <div className="border-t border-night-700/50 bg-night-900/60 px-4 py-2">
+                  <div className="border-t border-zinc-800/50 bg-night-900/60 px-4 py-2">
                     <div className="flex items-center gap-1.5">
                       <button
-                        className="btn-ghost !px-2 !py-1 !text-[10px]"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-violet-500/25 bg-violet-500/10 px-2.5 py-1.5 text-[10px] font-semibold text-violet-300 transition-colors hover:bg-violet-500/20"
                         title="Enviar link do orçamento"
                         onClick={() => {
                           if (selected.quote) {
@@ -784,21 +778,25 @@ export default function CrmPage() {
                           }
                         }}
                       >
-                        <CopyIcon /> Orçamento
+                        <Copy className="h-3 w-3" strokeWidth={2} /> Orçamento
                       </button>
                       <button
-                        className="btn-ghost !px-2 !py-1 !text-[10px]"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-2.5 py-1.5 text-[10px] font-semibold text-cyan-300 transition-colors hover:bg-cyan-500/20"
                         title="Alternar Robô / Humano"
                         onClick={() => void handoff(selected.humanMode ? 'release' : 'assume')}
                       >
-                        <BotIcon /> {selected.humanMode ? 'Liberar IA' : 'Assumir'}
+                        <Bot className="h-3 w-3" strokeWidth={2} /> {selected.humanMode ? 'Liberar IA' : 'Assumir'}
                       </button>
                       <button
-                        className={`btn-ghost !px-2 !py-1 !text-[10px] ${showQuickReplies ? 'border-brand/40 text-brand' : ''}`}
+                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] font-semibold transition-colors ${
+                          showQuickReplies
+                            ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
+                            : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                        }`}
                         title="Respostas rápidas"
                         onClick={() => setShowQuickReplies(!showQuickReplies)}
                       >
-                        <TagIcon /> Templates
+                        <Tag className="h-3 w-3" strokeWidth={2} /> Templates
                       </button>
                     </div>
                     {showQuickReplies && (
@@ -821,20 +819,10 @@ export default function CrmPage() {
                 )}
 
                 {/* Input */}
-                <div className="border-t border-night-700/50 bg-night-900/80 p-3 backdrop-blur">
-                  {typing && (
-                    <div className="mb-2 flex items-center gap-1.5 text-[11px] text-zinc-500">
-                      <span className="flex gap-0.5">
-                        <span className="h-1 w-1 animate-bounce rounded-full bg-brand/60 [animation-delay:0ms]" />
-                        <span className="h-1 w-1 animate-bounce rounded-full bg-brand/60 [animation-delay:150ms]" />
-                        <span className="h-1 w-1 animate-bounce rounded-full bg-brand/60 [animation-delay:300ms]" />
-                      </span>
-                      Enviando mensagem...
-                    </div>
-                  )}
+                <div className="border-t border-zinc-800/50 bg-night-900/80 p-3 backdrop-blur">
                   <div className="flex gap-2">
                     <input
-                      className="input !py-1.5 !text-xs"
+                      className="input !border-zinc-800/60 !py-1.5 !text-xs"
                       placeholder="Digite sua mensagem..."
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
@@ -848,7 +836,7 @@ export default function CrmPage() {
                       disabled={!draft.trim() || sending}
                       onClick={() => void sendMessage()}
                     >
-                      {sending ? '...' : <SendIcon />}
+                      {sending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" strokeWidth={2} /> : <Send className="h-3.5 w-3.5" strokeWidth={2} />}
                     </button>
                   </div>
                 </div>
@@ -857,7 +845,7 @@ export default function CrmPage() {
           </div>
 
           {/* ── COLUNA 3: Ficha do Lead / Contexto ── */}
-          <div className="flex min-h-0 flex-col border-l border-night-700/50 bg-night-900/60">
+          <div className="flex min-h-0 flex-col border-l border-zinc-800/50 bg-night-900/50">
             {!selected ? (
               <div className="flex flex-1 items-center justify-center p-4 text-center text-xs text-zinc-500">
                 Selecione uma conversa para ver os dados do lead.
@@ -865,7 +853,7 @@ export default function CrmPage() {
             ) : (
               <>
                 {/* Client Card Header */}
-                <div className="border-b border-night-700/50 p-4">
+                <div className="border-b border-zinc-800/50 p-4">
                   <div className="flex items-center gap-3">
                     <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white ${avatarColor(selected.id)}`}>
                       {getInitials(selected.customerName, selected.whatsappId)}
@@ -880,7 +868,7 @@ export default function CrmPage() {
                 </div>
 
                 {/* Tabs */}
-                <div className="flex gap-0.5 border-b border-night-700/50 bg-night-900/40 p-1.5">
+                <div className="flex gap-0.5 border-b border-zinc-800/50 bg-night-900/40 p-1.5">
                   <button
                     onClick={() => setSidebarTab('resumo')}
                     className={`flex-1 rounded-md px-2 py-1 text-[11px] font-semibold transition-all ${
@@ -963,8 +951,8 @@ export default function CrmPage() {
                       </div>
                     </Section>
 
-                    {/* Orçamento / Carrinho */}
-                    <Section title="Orçamento">
+                    {/* Setup montado (Monte seu PC) / Orçamento */}
+                    <Section title="Setup Montado · PC Gamer">
                       {selected.quote ? (
                         <WorkstationOrderSummary
                           quote={selected.quote}
@@ -1050,7 +1038,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 // ---------------------------------------------------------------------------
-// WorkstationOrderSummary (compact version for Col 3)
+// WorkstationOrderSummary — card tecnico do setup montado (Col 3, "PC Gamer")
 // ---------------------------------------------------------------------------
 
 function WorkstationOrderSummary({
@@ -1064,34 +1052,39 @@ function WorkstationOrderSummary({
 }) {
   const emitted = Boolean(quote.blingNumber);
   return (
-    <div className="mt-1.5 space-y-2 rounded-lg border border-night-700/70 bg-night-800/50 p-2.5">
+    <div className="mt-1.5 space-y-3 overflow-hidden rounded-xl border border-zinc-800/60 bg-gradient-to-b from-night-800/60 to-night-800/30 p-3 shadow-sm shadow-black/10">
+      {/* Header: codigo + badge de compatibilidade */}
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-xs font-bold text-brand">{quote.code}</span>
-        <span className="tabular text-[10px] text-zinc-500">{quote.items.length} itens</span>
+        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300 ring-1 ring-inset ring-emerald-500/25">
+          <ShieldCheck className="h-2.5 w-2.5" strokeWidth={2.5} />
+          Compatível
+        </span>
       </div>
 
-      {/* Items */}
-      <ul className="space-y-1 text-[11px] text-zinc-300">
-        {quote.items.slice(0, 5).map((item, i) => (
-          <li key={i} className="flex justify-between gap-2">
-            <span className="truncate">{item.quantity}x {item.name}</span>
-            <span className="tabular shrink-0 text-zinc-400">{formatBRL(item.unitPriceCents * item.quantity)}</span>
+      {/* Setup — lista tecnica de pecas */}
+      <ul className="space-y-1.5">
+        {quote.items.slice(0, 6).map((item, i) => (
+          <li key={i} className="flex items-center gap-2 rounded-lg border border-zinc-800/40 bg-night-900/40 px-2 py-1.5">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-night-800 text-zinc-400">
+              {partIcon(item.name)}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[11px] text-zinc-200">
+              {item.quantity > 1 ? `${item.quantity}x ` : ''}{item.name}
+            </span>
+            <span className="tabular shrink-0 text-[10px] text-zinc-500">{formatBRL(item.unitPriceCents * item.quantity)}</span>
           </li>
         ))}
-        {quote.items.length > 5 && (
-          <li className="text-[10px] text-zinc-500">+ {quote.items.length - 5} itens...</li>
+        {quote.items.length > 6 && (
+          <li className="px-1 text-[10px] text-zinc-500">+ {quote.items.length - 6} itens...</li>
         )}
       </ul>
 
       {/* Totals */}
-      <dl className="divider space-y-0.5 pt-1.5 text-[11px]">
+      <dl className="divider space-y-0.5 pt-2 text-[11px]">
         <div className="flex justify-between">
           <dt className="text-zinc-500">Subtotal</dt>
           <dd className="tabular text-zinc-300">{formatBRL(quote.totalCents)}</dd>
-        </div>
-        <div className="flex justify-between font-semibold text-brand">
-          <dt>PIX</dt>
-          <dd className="tabular">{formatBRL(quote.pixTotalCents)}</dd>
         </div>
         <div className="flex justify-between text-zinc-500">
           <dt>ou {quote.installments}x de</dt>
@@ -1099,35 +1092,36 @@ function WorkstationOrderSummary({
         </div>
       </dl>
 
-      {/* Actions */}
-      <div className="flex gap-1.5 pt-1">
-        <button
-          className="btn-ghost flex-1 !px-2 !py-1 !text-[10px]"
-          onClick={() => {
-            const url = `${window.location.origin}/quote/${quote.code}`;
-            navigator.clipboard.writeText(url).then(
-              () => toast.success('Link copiado!', { description: url }),
-              () => toast.error('Falha ao copiar link'),
-            );
-          }}
-        >
-          <CopyIcon /> Copiar link
-        </button>
-        <button
-          className="btn-ghost flex-1 !px-2 !py-1 !text-[10px]"
-          onClick={() => {
-            toast.info('Cobrança PIX', {
-              description: `PIX de ${formatBRL(quote.pixTotalCents)} — código: ${quote.code}`,
-            });
-          }}
-        >
-          <QrCodeIcon /> Cobrar PIX
-        </button>
-      </div>
+      {/* Cobrança PIX — proeminente */}
+      <button
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 px-3 py-2.5 text-xs font-bold text-night-950 shadow-lg shadow-emerald-500/20 transition-transform hover:scale-[1.01] active:scale-[0.99]"
+        onClick={() => {
+          toast.info('Cobrança PIX', {
+            description: `PIX de ${formatBRL(quote.pixTotalCents)} — código: ${quote.code}`,
+          });
+        }}
+      >
+        <QrCode className="h-4 w-4" strokeWidth={2.25} />
+        Cobrar PIX · {formatBRL(quote.pixTotalCents)}
+      </button>
+
+      <button
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-800/60 bg-night-900/40 px-2 py-1.5 text-[10px] font-semibold text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-200"
+        onClick={() => {
+          const url = `${window.location.origin}/quote/${quote.code}`;
+          navigator.clipboard.writeText(url).then(
+            () => toast.success('Link copiado!', { description: url }),
+            () => toast.error('Falha ao copiar link'),
+          );
+        }}
+      >
+        <Copy className="h-3 w-3" strokeWidth={2} /> Copiar link do orçamento
+      </button>
 
       {/* Bling Status */}
       {emitted ? (
-        <p className="rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-300 ring-1 ring-inset ring-emerald-500/25">
+        <p className="flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-300 ring-1 ring-inset ring-emerald-500/25">
+          <CircleCheckBig className="h-3 w-3 shrink-0" strokeWidth={2} />
           Pedido Bling #{quote.blingNumber}{quote.blingStatus ? ` · ${quote.blingStatus}` : ''}
         </p>
       ) : status === 'AGUARDANDO_NF' ? (
@@ -1464,9 +1458,9 @@ function CommandPalette({
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-night-950/70 p-4 pt-[12vh] backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="surface w-full max-w-xl overflow-hidden !p-0 shadow-pop">
-        <div className="flex items-center gap-2.5 border-b border-night-700/70 px-3">
-          <span className="text-zinc-500"><SearchIcon /></span>
+      <div className="glass w-full max-w-xl overflow-hidden !rounded-2xl !p-0 shadow-pop">
+        <div className="flex items-center gap-2.5 border-b border-zinc-800/60 px-3">
+          <span className="text-zinc-500"><Search className="h-4 w-4" strokeWidth={2} /></span>
           <input
             ref={inputRef}
             className="input !border-0 !bg-transparent !px-0 !py-3 !text-sm !shadow-none !ring-0"
@@ -1513,15 +1507,3 @@ function CommandPalette({
   );
 }
 
-// ---------------------------------------------------------------------------
-// SearchIcon
-// ---------------------------------------------------------------------------
-
-function SearchIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="11" cy="11" r="8" />
-      <path d="m21 21-4.35-4.35" />
-    </svg>
-  );
-}

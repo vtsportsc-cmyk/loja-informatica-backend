@@ -1,17 +1,29 @@
-// Dashboard Gerencial — visão executiva do CRM (estilo CV CRM / Suri Shop).
+// Dashboard Gerencial — visão executiva do CRM (estilo Stripe/Linear/Intercom).
 'use client';
 
 import { useMemo, useState } from 'react';
+import {
+  AlertTriangle,
+  ArrowDownRight,
+  ArrowUpRight,
+  CircleCheckBig,
+  FileText,
+  Info,
+  Minus,
+  MessageSquare,
+  UserCog,
+  Users,
+  Wallet,
+} from 'lucide-react';
 import { formatBRL } from '@loja/catalog';
-import { FUNNEL_STATUSES, FUNNEL_STATUS_LABELS, FUNNEL_STATUS_COLORS } from '@/lib/funnel';
 import type { Agent, Conversation } from '@/lib/crm-types';
-import { fmtTime } from '@/lib/crm-types';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 type Period = 'today' | '7d' | '30d' | 'all';
+type Severity = 'alta' | 'media' | 'info';
 
 interface CrmDashboardProps {
   conversations: Conversation[];
@@ -19,28 +31,31 @@ interface CrmDashboardProps {
 }
 
 // ---------------------------------------------------------------------------
-// Funnel stage mapping for the visual chart
+// Funnel stage mapping for the visual chart (cores estaticas p/ o Tailwind JIT)
 // ---------------------------------------------------------------------------
 
 const FUNNEL_CHART_STAGES: Array<{
   status: string;
   label: string;
-  color: string;
-  barColor: string;
+  textColor: string;
+  dot: string;
+  gradient: string;
 }> = [
-  { status: 'NOVO', label: 'Atendimento IA', color: 'text-sky-300', barColor: 'bg-sky-500' },
-  { status: 'MONTANDO_PC', label: 'Montando PC', color: 'text-blue-300', barColor: 'bg-blue-500' },
-  { status: 'EM_QUALIFICACAO', label: 'Em Qualificação', color: 'text-amber-300', barColor: 'bg-amber-500' },
-  { status: 'CARRINHO', label: 'Orçamento Criado', color: 'text-violet-300', barColor: 'bg-violet-500' },
-  { status: 'PIX_GERADO', label: 'Aguardando PIX', color: 'text-cyan-300', barColor: 'bg-cyan-500' },
-  { status: 'AGUARDANDO_NF', label: 'Aguardando NF', color: 'text-orange-300', barColor: 'bg-orange-500' },
-  { status: 'CONCLUIDO', label: 'Concluído', color: 'text-emerald-300', barColor: 'bg-emerald-500' },
-  { status: 'CANCELADO', label: 'Cancelado', color: 'text-red-300', barColor: 'bg-red-500' },
+  { status: 'NOVO', label: 'Atendimento IA', textColor: 'text-sky-300', dot: 'bg-sky-400', gradient: 'from-sky-500/90 to-sky-400' },
+  { status: 'MONTANDO_PC', label: 'Montando PC', textColor: 'text-blue-300', dot: 'bg-blue-400', gradient: 'from-blue-500/90 to-blue-400' },
+  { status: 'EM_QUALIFICACAO', label: 'Em Qualificação', textColor: 'text-amber-300', dot: 'bg-amber-400', gradient: 'from-amber-500/90 to-amber-400' },
+  { status: 'CARRINHO', label: 'Orçamento Criado', textColor: 'text-violet-300', dot: 'bg-violet-400', gradient: 'from-violet-500/90 to-violet-400' },
+  { status: 'PIX_GERADO', label: 'Aguardando PIX', textColor: 'text-cyan-300', dot: 'bg-cyan-400', gradient: 'from-cyan-500/90 to-cyan-400' },
+  { status: 'AGUARDANDO_NF', label: 'Aguardando NF', textColor: 'text-orange-300', dot: 'bg-orange-400', gradient: 'from-orange-500/90 to-orange-400' },
+  { status: 'CONCLUIDO', label: 'Concluído', textColor: 'text-emerald-300', dot: 'bg-emerald-400', gradient: 'from-emerald-500/90 to-emerald-400' },
+  { status: 'CANCELADO', label: 'Cancelado', textColor: 'text-red-300', dot: 'bg-red-400', gradient: 'from-red-500/90 to-red-400' },
 ];
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const DAY_MS = 86_400_000;
 
 function isWithinPeriod(iso: string | null, period: Period): boolean {
   if (!iso || period === 'all') return true;
@@ -50,7 +65,7 @@ function isWithinPeriod(iso: string | null, period: Period): boolean {
     const today = new Date();
     return d.toDateString() === today.toDateString();
   }
-  const ms = period === '7d' ? 7 * 86_400_000 : 30 * 86_400_000;
+  const ms = period === '7d' ? 7 * DAY_MS : 30 * DAY_MS;
   return now - d.getTime() < ms;
 }
 
@@ -61,6 +76,32 @@ const PERIOD_OPTIONS: Array<{ value: Period; label: string }> = [
   { value: 'all', label: 'Tudo' },
 ];
 
+/**
+ * Serie diaria (ultimos 7 dias) para a micro-sparkline dos KPIs, derivada do
+ * `lastMessageAt` real das conversas — funciona como um "pulso de atividade"
+ * e nao um historico contabil exato (nao ha eventos versionados no backend).
+ */
+function useDailyPulse(base: Conversation[], predicate: (c: Conversation) => boolean) {
+  return useMemo(() => {
+    const points = new Array(7).fill(0);
+    const now = Date.now();
+    for (const c of base) {
+      if (!c.lastMessageAt || !predicate(c)) continue;
+      const diffDays = Math.floor((now - new Date(c.lastMessageAt).getTime()) / DAY_MS);
+      const idx = 6 - diffDays;
+      if (idx >= 0 && idx < 7) points[idx] += 1;
+    }
+    const today = points[6];
+    const yesterday = points[5];
+    let pct: number | null;
+    if (yesterday > 0) pct = ((today - yesterday) / yesterday) * 100;
+    else if (today > 0) pct = 100;
+    else pct = 0;
+    return { points, pct };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base, predicate]);
+}
+
 // ---------------------------------------------------------------------------
 // CrmDashboard
 // ---------------------------------------------------------------------------
@@ -69,16 +110,19 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
   const [period, setPeriod] = useState<Period>('all');
   const [vendorFilter, setVendorFilter] = useState<string>('todos');
 
-  const filtered = useMemo(() => {
+  const byVendor = useMemo(() => {
     return conversations.filter((c) => {
-      const matchPeriod = isWithinPeriod(c.lastMessageAt, period);
       const matchVendor =
         vendorFilter === 'todos' ||
         (vendorFilter === 'sem-vendedor' && !c.assignedAgentId) ||
         c.assignedAgentId === vendorFilter;
-      return matchPeriod && matchVendor;
+      return matchVendor;
     });
-  }, [conversations, period, vendorFilter]);
+  }, [conversations, vendorFilter]);
+
+  const filtered = useMemo(() => {
+    return byVendor.filter((c) => isWithinPeriod(c.lastMessageAt, period));
+  }, [byVendor, period]);
 
   // ── KPIs ──
   const kpis = useMemo(() => {
@@ -101,6 +145,11 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
       totalPix,
     };
   }, [filtered]);
+
+  const activePulse = useDailyPulse(byVendor, (c) => c.funnelStatus !== 'CONCLUIDO' && c.funnelStatus !== 'CANCELADO');
+  const quotesPulse = useDailyPulse(byVendor, (c) => Boolean(c.quote));
+  const humanPulse = useDailyPulse(byVendor, (c) => c.humanMode);
+  const soldPulse = useDailyPulse(byVendor, (c) => c.funnelStatus === 'CONCLUIDO' && Boolean(c.quote));
 
   // ── Funnel distribution ──
   const funnelData = useMemo(() => {
@@ -134,11 +183,10 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
       });
   }, [agents, filtered]);
 
-  // ── Alerts ──
+  // ── Alerts (system toast, com severidade) ──
   const alerts = useMemo(() => {
-    const list: Array<{ type: 'warning' | 'info'; title: string; detail: string }> = [];
+    const list: Array<{ severity: Severity; title: string; detail: string }> = [];
 
-    // Low-value quotes about to expire (no activity in 48h)
     const staleQuotes = filtered.filter(
       (c) =>
         c.quote &&
@@ -149,7 +197,7 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
     );
     if (staleQuotes.length > 0) {
       list.push({
-        type: 'warning',
+        severity: staleQuotes.length >= 3 ? 'alta' : 'media',
         title: `${staleQuotes.length} orçamento(s) sem atividade 48h+`,
         detail: staleQuotes
           .slice(0, 3)
@@ -158,22 +206,6 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
       });
     }
 
-    // High-value leads in cart
-    const highCart = filtered.filter(
-      (c) => c.funnelStatus === 'CARRINHO' && (c.quote?.pixTotalCents ?? 0) > 500000,
-    );
-    if (highCart.length > 0) {
-      list.push({
-        type: 'info',
-        title: `${highCart.length} lead(s) de alto valor no carrinho`,
-        detail: highCart
-          .slice(0, 3)
-          .map((c) => `${formatBRL(c.quote!.pixTotalCents)} · ${c.customerName ?? c.whatsappId}`)
-          .join('\n'),
-      });
-    }
-
-    // PIX generated but not paid (stale)
     const stalePix = filtered.filter(
       (c) =>
         c.funnelStatus === 'PIX_GERADO' &&
@@ -182,7 +214,7 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
     );
     if (stalePix.length > 0) {
       list.push({
-        type: 'warning',
+        severity: 'alta',
         title: `${stalePix.length} PIX(s) aguardando pagamento 24h+`,
         detail: stalePix
           .slice(0, 3)
@@ -191,30 +223,35 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
       });
     }
 
-    return list;
+    const highCart = filtered.filter(
+      (c) => c.funnelStatus === 'CARRINHO' && (c.quote?.pixTotalCents ?? 0) > 500000,
+    );
+    if (highCart.length > 0) {
+      list.push({
+        severity: 'info',
+        title: `${highCart.length} lead(s) de alto valor no carrinho`,
+        detail: highCart
+          .slice(0, 3)
+          .map((c) => `${formatBRL(c.quote!.pixTotalCents)} · ${c.customerName ?? c.whatsappId}`)
+          .join('\n'),
+      });
+    }
+
+    const severityRank: Record<Severity, number> = { alta: 0, media: 1, info: 2 };
+    return list.sort((a, b) => severityRank[a.severity] - severityRank[b.severity]);
   }, [filtered]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-0.5">
       {/* ── Filters ── */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Período</span>
-          <div className="flex rounded-lg border border-night-700/70 bg-night-800/40 p-0.5">
-            {PERIOD_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setPeriod(opt.value)}
-                className={`rounded-md px-3 py-1 text-[11px] font-semibold transition-all ${
-                  period === opt.value
-                    ? 'bg-night-700 text-white shadow-sm'
-                    : 'text-zinc-400 hover:text-zinc-100'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            value={period}
+            onChange={setPeriod}
+            options={PERIOD_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+          />
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Vendedor</span>
@@ -240,31 +277,31 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
         <KpiCard
           label="Conversas Ativas"
           value={String(kpis.activeCount)}
-          icon={<ChatActiveIcon />}
-          color="text-sky-300"
-          bg="bg-sky-500/10"
+          icon={<MessageSquare className="h-[18px] w-[18px]" strokeWidth={2} />}
+          accent="sky"
+          pulse={activePulse}
         />
         <KpiCard
           label="Orçamentos (24h)"
           value={String(kpis.quotes24hCount)}
-          icon={<QuoteIcon />}
-          color="text-violet-300"
-          bg="bg-violet-500/10"
+          icon={<FileText className="h-[18px] w-[18px]" strokeWidth={2} />}
+          accent="violet"
+          pulse={quotesPulse}
         />
         <KpiCard
           label="Transbordos Humanos"
           value={String(kpis.humanCount)}
-          icon={<HumanIcon />}
-          color="text-brand"
-          bg="bg-brand/10"
+          icon={<UserCog className="h-[18px] w-[18px]" strokeWidth={2} />}
+          accent="emerald"
+          pulse={humanPulse}
         />
         <KpiCard
           label="Vendas Concluídas"
           value={String(kpis.soldCount)}
           sub={formatBRL(kpis.totalPix)}
-          icon={<SoldIcon />}
-          color="text-emerald-300"
-          bg="bg-emerald-500/10"
+          icon={<Wallet className="h-[18px] w-[18px]" strokeWidth={2} />}
+          accent="cyan"
+          pulse={soldPulse}
         />
       </div>
 
@@ -272,7 +309,7 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[1fr_320px]">
 
         {/* Funnel Chart */}
-        <div className="surface">
+        <div className="glass-panel">
           <div className="flex items-center justify-between">
             <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
               Funil de Leads
@@ -281,19 +318,32 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
               {filtered.length} total
             </span>
           </div>
-          <div className="mt-4 space-y-3">
+          <div className="mt-5 space-y-3.5">
             {funnelData.map((stage) => (
-              <div key={stage.status} className="flex items-center gap-3">
-                <span className={`w-36 shrink-0 truncate text-[11px] font-medium ${stage.color}`}>
+              <div key={stage.status} className="group flex items-center gap-3">
+                <span className={`w-36 shrink-0 truncate text-[11px] font-medium ${stage.textColor}`}>
                   {stage.label}
                 </span>
-                <div className="h-6 flex-1 overflow-hidden rounded-md bg-night-800/60">
-                  <div
-                    className={`h-full rounded-md ${stage.barColor} transition-all duration-500`}
-                    style={{ width: `${Math.max(stage.barWidth, stage.count > 0 ? 4 : 0)}%` }}
-                  />
+                <div className="relative h-6 flex-1">
+                  <div className="h-full overflow-hidden rounded-md bg-night-800/60 ring-1 ring-inset ring-white/[0.03]">
+                    <div
+                      className={`h-full rounded-md bg-gradient-to-r ${stage.gradient} shadow-[0_0_10px_-2px_rgba(0,0,0,0.5)] transition-all duration-700 ease-out`}
+                      style={{ width: `${Math.max(stage.barWidth, stage.count > 0 ? 4 : 0)}%` }}
+                    />
+                  </div>
+                  {/* Tooltip flutuante */}
+                  {stage.count > 0 && (
+                    <div
+                      className="pointer-events-none absolute -top-9 z-20 -translate-x-1/2 whitespace-nowrap rounded-lg border border-zinc-700/60 bg-night-900/95 px-2.5 py-1.5 text-[10px] font-medium text-zinc-100 opacity-0 shadow-xl shadow-black/40 backdrop-blur-md transition-all duration-200 group-hover:opacity-100"
+                      style={{ left: `${Math.min(Math.max(stage.barWidth, 4), 96)}%` }}
+                    >
+                      <span className={stage.textColor}>{stage.label}</span>{' '}
+                      <span className="text-zinc-400">· {stage.count} ({stage.pct.toFixed(1)}%)</span>
+                      <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-zinc-700/60" />
+                    </div>
+                  )}
                 </div>
-                <span className="tabular w-12 shrink-0 text-right text-[11px] font-semibold text-zinc-300">
+                <span className="tabular w-8 shrink-0 text-right text-[11px] font-semibold text-zinc-300">
                   {stage.count}
                 </span>
                 <span className="tabular w-12 shrink-0 text-right text-[10px] text-zinc-500">
@@ -304,13 +354,13 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
           </div>
 
           {/* Summary bar */}
-          <div className="mt-5 flex items-center gap-1 rounded-lg bg-night-800/30 p-2">
+          <div className="mt-5 flex items-center gap-1 rounded-lg bg-night-800/30 p-2 ring-1 ring-inset ring-white/[0.03]">
             {funnelData.filter((s) => s.count > 0).map((stage) => {
               const w = filtered.length > 0 ? (stage.count / filtered.length) * 100 : 0;
               return (
                 <div
                   key={stage.status}
-                  className={`h-2 rounded-sm ${stage.barColor} transition-all duration-500`}
+                  className={`h-2 rounded-sm bg-gradient-to-r ${stage.gradient} transition-all duration-700`}
                   style={{ width: `${w}%` }}
                   title={`${stage.label}: ${stage.count}`}
                 />
@@ -320,7 +370,7 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
             {funnelData.filter((s) => s.count > 0).map((stage) => (
               <span key={stage.status} className="flex items-center gap-1.5 text-[10px] text-zinc-400">
-                <span className={`h-2 w-2 rounded-sm ${stage.barColor}`} />
+                <span className={`h-2 w-2 rounded-sm ${stage.dot}`} />
                 {stage.label} ({stage.count})
               </span>
             ))}
@@ -331,10 +381,13 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
         <div className="flex flex-col gap-4">
 
           {/* Online Sellers */}
-          <div className="surface">
-            <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-              Vendedores Online
-            </h3>
+          <div className="glass-panel">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+                Vendedores Online
+              </h3>
+              <Users className="h-3.5 w-3.5 text-zinc-600" strokeWidth={2} />
+            </div>
             {onlineSellers.length === 0 ? (
               <p className="mt-3 text-xs text-zinc-500">Nenhum vendedor com atendimentos ativos.</p>
             ) : (
@@ -342,13 +395,13 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
                 {onlineSellers.map((seller) => (
                   <div
                     key={seller.id}
-                    className="flex items-center gap-2.5 rounded-lg border border-night-700/50 bg-night-800/40 px-3 py-2"
+                    className="flex items-center gap-2.5 rounded-lg border border-zinc-800/50 bg-night-800/40 px-3 py-2 transition-colors hover:border-zinc-700/60"
                   >
-                    <div className="relative">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-bold text-white">
+                    <div className="relative shrink-0">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-emerald-700 text-[10px] font-bold text-white">
                         {seller.name.slice(0, 2).toUpperCase()}
                       </div>
-                      <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-night-900 bg-emerald-400" />
+                      <span className="status-ring-online absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-night-900 bg-emerald-400" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-semibold text-zinc-100">{seller.name}</p>
@@ -356,6 +409,9 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
                         {seller.role ?? 'Atendente'} · {seller.activeCount} ativo{seller.activeCount !== 1 ? 's' : ''}
                       </p>
                     </div>
+                    <span className="tabular shrink-0 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold text-emerald-300 ring-1 ring-inset ring-emerald-500/25">
+                      {seller.activeCount}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -363,35 +419,28 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
           </div>
 
           {/* Alerts */}
-          <div className="surface">
-            <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-              Central de Alertas
-            </h3>
+          <div className="glass-panel min-h-0 flex-1">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+                Central de Alertas
+              </h3>
+              {alerts.length > 0 && (
+                <span className="tabular rounded-full bg-rose-500/10 px-1.5 py-0.5 text-[9px] font-bold text-rose-300 ring-1 ring-inset ring-rose-500/25">
+                  {alerts.length}
+                </span>
+              )}
+            </div>
             {alerts.length === 0 ? (
               <div className="mt-3 flex flex-col items-center gap-2 py-4">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/10">
-                  <CheckIcon className="h-4 w-4 text-emerald-400" />
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500/10 ring-1 ring-inset ring-emerald-500/20">
+                  <CircleCheckBig className="h-4 w-4 text-emerald-400" strokeWidth={2} />
                 </div>
                 <p className="text-xs text-zinc-500">Tudo sob controle.</p>
               </div>
             ) : (
               <div className="mt-3 space-y-2">
                 {alerts.map((alert, i) => (
-                  <div
-                    key={i}
-                    className={`rounded-lg border px-3 py-2.5 ${
-                      alert.type === 'warning'
-                        ? 'border-amber-500/25 bg-amber-500/5'
-                        : 'border-sky-500/25 bg-sky-500/5'
-                    }`}
-                  >
-                    <p className={`text-[11px] font-semibold ${alert.type === 'warning' ? 'text-amber-300' : 'text-sky-300'}`}>
-                      {alert.title}
-                    </p>
-                    <p className="mt-1 whitespace-pre-line text-[10px] leading-snug text-zinc-400">
-                      {alert.detail}
-                    </p>
-                  </div>
+                  <AlertToast key={i} severity={alert.severity} title={alert.title} detail={alert.detail} />
                 ))}
               </div>
             )}
@@ -403,87 +452,187 @@ export function CrmDashboard({ conversations, agents }: CrmDashboardProps) {
 }
 
 // ---------------------------------------------------------------------------
-// KPI Card
+// SegmentedControl — pill animado reutilizavel (period, module toggles, etc.)
 // ---------------------------------------------------------------------------
+
+export function SegmentedControl<T extends string>({
+  value,
+  onChange,
+  options,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: Array<{ value: T; label: string; icon?: React.ReactNode }>;
+}) {
+  const index = Math.max(0, options.findIndex((o) => o.value === value));
+  const count = options.length;
+  return (
+    <div className="segmented" role="tablist">
+      <span
+        className="segmented-thumb"
+        style={{
+          width: `calc(${100 / count}% - 4px)`,
+          transform: `translateX(calc(${index * 100}% + ${index * 4}px))`,
+        }}
+        aria-hidden
+      />
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          role="tab"
+          aria-selected={value === opt.value}
+          onClick={() => onChange(opt.value)}
+          className={`segmented-btn ${value === opt.value ? 'text-white' : 'text-zinc-400 hover:text-zinc-100'}`}
+        >
+          {opt.icon}
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// KPI Card — numero + badge de tendencia + micro-sparkline
+// ---------------------------------------------------------------------------
+
+const ACCENT_STYLES: Record<string, { bg: string; text: string; ring: string; line: string; fill: string }> = {
+  sky: { bg: 'bg-sky-500/10', text: 'text-sky-300', ring: 'ring-sky-500/20', line: '#38bdf8', fill: 'rgba(56,189,248,0.16)' },
+  violet: { bg: 'bg-violet-500/10', text: 'text-violet-300', ring: 'ring-violet-500/20', line: '#a78bfa', fill: 'rgba(167,139,250,0.16)' },
+  emerald: { bg: 'bg-emerald-500/10', text: 'text-emerald-300', ring: 'ring-emerald-500/20', line: '#34d399', fill: 'rgba(52,211,153,0.16)' },
+  cyan: { bg: 'bg-cyan-500/10', text: 'text-cyan-300', ring: 'ring-cyan-500/20', line: '#22d3ee', fill: 'rgba(34,211,238,0.16)' },
+};
 
 function KpiCard({
   label,
   value,
   sub,
   icon,
-  color,
-  bg,
+  accent,
+  pulse,
 }: {
   label: string;
   value: string;
   sub?: string;
   icon: React.ReactNode;
-  color: string;
-  bg: string;
+  accent: keyof typeof ACCENT_STYLES;
+  pulse: { points: number[]; pct: number | null };
 }) {
+  const style = ACCENT_STYLES[accent];
+  const trendUp = (pulse.pct ?? 0) > 0;
+  const trendFlat = (pulse.pct ?? 0) === 0;
+
   return (
-    <div className="surface flex items-start gap-3">
-      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${bg} ${color}`}>
-        {icon}
+    <div className="glass-panel group relative overflow-hidden !p-3.5 transition-transform duration-200 hover:-translate-y-0.5">
+      <div className="flex items-start justify-between gap-2">
+        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${style.bg} ${style.text} ring-1 ring-inset ${style.ring}`}>
+          {icon}
+        </div>
+        <TrendBadge pct={pulse.pct} />
       </div>
-      <div className="min-w-0">
+      <div className="mt-3 min-w-0">
         <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">{label}</p>
-        <p className={`tabular mt-0.5 text-2xl font-bold tracking-tight ${color}`}>{value}</p>
-        {sub && <p className="tabular text-[11px] text-zinc-400">{sub}</p>}
+        <div className="mt-0.5 flex items-end justify-between gap-2">
+          <p className={`tabular text-2xl font-bold tracking-tight ${style.text}`}>{value}</p>
+          <Sparkline points={pulse.points} stroke={style.line} fill={style.fill} />
+        </div>
+        {sub && <p className="tabular mt-0.5 text-[11px] text-zinc-400">{sub}</p>}
+        {!trendFlat && (
+          <p className="mt-1 text-[9px] text-zinc-600">{trendUp ? 'alta' : 'queda'} vs. ontem</p>
+        )}
       </div>
     </div>
   );
 }
 
+function TrendBadge({ pct }: { pct: number | null }) {
+  if (pct === null || pct === 0) {
+    return (
+      <span className="inline-flex items-center gap-0.5 rounded-full bg-zinc-500/10 px-1.5 py-0.5 text-[9px] font-bold text-zinc-500 ring-1 ring-inset ring-zinc-500/20">
+        <Minus className="h-2.5 w-2.5" strokeWidth={3} />
+        0%
+      </span>
+    );
+  }
+  const up = pct > 0;
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-bold ring-1 ring-inset ${
+        up
+          ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/25'
+          : 'bg-rose-500/10 text-rose-300 ring-rose-500/25'
+      }`}
+    >
+      {up ? <ArrowUpRight className="h-2.5 w-2.5" strokeWidth={3} /> : <ArrowDownRight className="h-2.5 w-2.5" strokeWidth={3} />}
+      {Math.abs(pct).toFixed(0)}%
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Icons
+// Sparkline — micro grafico de tendencia em SVG (sem dependencias externas)
 // ---------------------------------------------------------------------------
 
-function ChatActiveIcon() {
+function Sparkline({ points, stroke, fill }: { points: number[]; stroke: string; fill: string }) {
+  const w = 64;
+  const h = 24;
+  const max = Math.max(1, ...points);
+  const step = w / Math.max(1, points.length - 1);
+  const coords = points.map((p, i) => [i * step, h - (p / max) * (h - 4) - 2]);
+  const line = coords.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const area = `${line} L${w},${h} L0,${h} Z`;
+
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="shrink-0 overflow-visible" aria-hidden>
+      <path d={area} fill={fill} stroke="none" />
+      <path d={line} fill="none" stroke={stroke} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={coords[coords.length - 1][0]} cy={coords[coords.length - 1][1]} r={2} fill={stroke} />
     </svg>
   );
 }
 
-function QuoteIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="16" x2="8" y1="13" y2="13" />
-      <line x1="16" x2="8" y1="17" y2="17" />
-      <line x1="10" x2="8" y1="9" y2="9" />
-    </svg>
-  );
-}
+// ---------------------------------------------------------------------------
+// AlertToast — card de alerta com severidade (Alta/Media/Info)
+// ---------------------------------------------------------------------------
 
-function HumanIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}
+const SEVERITY_META: Record<Severity, { label: string; cls: string; iconCls: string; icon: React.ReactNode }> = {
+  alta: {
+    label: 'Alta',
+    cls: 'border-rose-500/25 bg-rose-500/5',
+    iconCls: 'bg-rose-500/15 text-rose-300 ring-rose-500/25',
+    icon: <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2} />,
+  },
+  media: {
+    label: 'Média',
+    cls: 'border-amber-500/25 bg-amber-500/5',
+    iconCls: 'bg-amber-500/15 text-amber-300 ring-amber-500/25',
+    icon: <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2} />,
+  },
+  info: {
+    label: 'Info',
+    cls: 'border-sky-500/25 bg-sky-500/5',
+    iconCls: 'bg-sky-500/15 text-sky-300 ring-sky-500/25',
+    icon: <Info className="h-3.5 w-3.5" strokeWidth={2} />,
+  },
+};
 
-function SoldIcon() {
+function AlertToast({ severity, title, detail }: { severity: Severity; title: string; detail: string }) {
+  const meta = SEVERITY_META[severity];
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M6 3h12l4 6-10 13L2 9z" />
-      <path d="M11 3 8 9l4 13 4-13-3-6" />
-      <path d="M2 9h20" />
-    </svg>
-  );
-}
-
-function CheckIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={className}>
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
+    <div className={`toast-alert animate-fade-in-up ${meta.cls}`}>
+      <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset ${meta.iconCls}`}>
+        {meta.icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className={`rounded px-1 py-px text-[8px] font-bold uppercase tracking-wider ${meta.iconCls}`}>
+            {meta.label}
+          </span>
+          <p className="truncate text-[11px] font-semibold text-zinc-100">{title}</p>
+        </div>
+        <p className="mt-1 whitespace-pre-line text-[10px] leading-snug text-zinc-400">{detail}</p>
+      </div>
+    </div>
   );
 }
