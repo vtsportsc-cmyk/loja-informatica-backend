@@ -44,15 +44,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/builder" className="btn-ghost">
                 Monte seu PC
               </Link>
-              <Link href="/crm" className="btn-ghost">
-                Painel CRM
-              </Link>
             </div>
           </nav>
         </header>
         <main className="flex-1">{children}</main>
         <footer className="border-t border-night-700 py-6 text-center text-xs text-zinc-500">
-          LojaTech — atendimento via WhatsApp (Evolution API), pagamento PIX/Cartão e NF pelo Bling.
+          LojaTech — atendimento via WhatsApp (Evolution API), pagamento exclusivo via PIX e NF pelo Bling.
         </footer>
       </body>
     </html>

@@ -14,7 +14,7 @@ const CATEGORIES = [
 const STEPS = [
   { title: 'Monte seu PC', text: 'Escolha cada peça com validação de compatibilidade em tempo real.' },
   { title: 'Receba no WhatsApp', text: 'Gere o orçamento e envie direto para o nosso atendimento.' },
-  { title: 'Pague do seu jeito', text: 'PIX com 5% de desconto ou parcelado em até 12x.' },
+  { title: 'Pague com PIX', text: 'Pagamento online exclusivo via PIX, com 5% de desconto e confirmação na hora.' },
   { title: 'Nota fiscal e envio', text: 'Separamos, emitimos a NF pelo Bling e despachamos.' },
 ];
 
@@ -33,9 +33,6 @@ export default function HomePage() {
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <Link href="/builder" className="btn-primary px-6 py-3 text-base">
             Começar a montar
-          </Link>
-          <Link href="/crm" className="btn-ghost px-6 py-3 text-base">
-            Painel do time
           </Link>
         </div>
       </section>

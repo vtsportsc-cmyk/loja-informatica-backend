@@ -54,7 +54,7 @@ export class CrmFollowUpHandler {
 function defaultFollowUpMessage(payload: CrmFollowUp): string {
   switch (payload.reason) {
     case 'abandoned_cart':
-      return 'Ola! Notei que voce deixou seu carrinho na loja. Quer continuar o pedido? Posso finalizar com PIX ou cartao de credito.';
+      return 'Ola! Notei que voce deixou seu carrinho na loja. Quer continuar o pedido? Posso finalizar agora mesmo via PIX.';
     case 'pix_expired_followup':
       return 'Ola! Sua cobranca PIX expirou. Se quiser, posso gerar uma nova ou ajustar o carrinho.';
     default:

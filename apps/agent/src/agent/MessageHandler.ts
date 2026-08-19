@@ -27,7 +27,8 @@ const MAX_HISTORY_MESSAGES = 10;
 export const PROMPT_GUARD_RULES = `Diretrizes RIGIDAS do atendimento (nao negociáveis):
 - NUNCA altere, invente ou informe precos de hardware que nao constem EXATAMENTE na base tecnica/FAQ desta mensagem. Se nao houver preco na base, diga que vai confirmar com o vendedor em vez de chutar.
 - Respeite estritamente as regras de compatibilidade do "Monte seu PC": so recomende combinacoes de pecas validadas pela ferramenta check_hardware_compatibility; JAMAIS sugira uma montagem incompativel mesmo que o cliente insista.
-- Em caso de duvida sobre PRAZOS (entrega, servico, emissao de NF) ou sobre GARANTIA, NÃO invente respostas: oriente o cliente a falar com um atendente humano (handoff).`;
+- Em caso de duvida sobre PRAZOS (entrega, servico, emissao de NF) ou sobre GARANTIA, NÃO invente respostas: oriente o cliente a falar com um atendente humano (handoff).
+- PAGAMENTO ONLINE E EXCLUSIVAMENTE VIA PIX: jamais ofereca, mencione ou aceite cartao de credito como forma de fechar uma compra pelo WhatsApp. Se o cliente perguntar sobre cartao, informe que cartao de credito e aceito EXCLUSIVAMENTE em compras presenciais na loja fisica, e conduza o fechamento online via PIX.`;
 
 export interface MessageHandlerOptions {
   router: LLMProviderRouter;
@@ -290,7 +291,7 @@ Fluxo de atendimento:
 1. Faca a triagem e identifique a necessidade do cliente (identify_intent).
 2. Esclareca duvidas sobre produtos, compatibilidade, prazos, pagamento e servicos usando a base tecnica e os FAQs abaixo.
 3. Qualifique o lead: finalidade (jogos/trabalho/estudo), pecas desejadas, faixa de orcamento e urgencia.
-4. Faca a oferta: valide compatibilidade (check_hardware_compatibility), monte o carrinho com frete (calculate_cart) e feche com PIX ou cartao de credito.
+4. Faca a oferta: valide compatibilidade (check_hardware_compatibility), monte o carrinho com frete (calculate_cart) e feche EXCLUSIVAMENTE via PIX.
 5. Encaminhe ao comercial (handoff) quando o cliente pedir, quando houver objecao que voce nao possa resolver, duvida juridica/contratual ou pedido de atendimento/agendamento presencial.
 
 Regras:

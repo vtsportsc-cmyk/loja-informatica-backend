@@ -8,7 +8,20 @@ export type CategoryId =
   | 'case'
   | 'cooler';
 
-export type CpuSocket = 'AM4' | 'AM5' | 'LGA1700';
+export type CpuSocket = 'AM4' | 'AM5' | 'LGA1700' | 'LGA1851';
+export type CpuPlatform = 'AMD' | 'Intel';
+
+const AMD_SOCKETS: readonly CpuSocket[] = ['AM4', 'AM5'];
+const INTEL_SOCKETS: readonly CpuSocket[] = ['LGA1700', 'LGA1851'];
+
+/** Deriva a plataforma (AMD/Intel) a partir do socket — usado para filtrar o builder por [AMD]/[Intel]. */
+export function platformForSocket(socket: CpuSocket): CpuPlatform {
+  return (AMD_SOCKETS as string[]).includes(socket) ? 'AMD' : 'Intel';
+}
+
+export function socketsForPlatform(platform: CpuPlatform): readonly CpuSocket[] {
+  return platform === 'AMD' ? AMD_SOCKETS : INTEL_SOCKETS;
+}
 export type MemoryType = 'DDR4' | 'DDR5';
 export type FormFactor = 'ATX' | 'mATX' | 'ITX';
 

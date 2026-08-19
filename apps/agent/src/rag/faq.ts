@@ -92,7 +92,7 @@ export const DEFAULT_FAQS: readonly FaqEntry[] = [
     category: 'pagamento',
     question: 'Quais formas de pagamento sao aceitas?',
     answer:
-      'Aceitamos PIX (com desconto), cartao de credito em ate 12x e boleto. No PIX o pagamento e confirmado na hora e a separacao e a emissao da NF sao feitas pelo vendedor.',
+      'Nas compras online (WhatsApp/site) aceitamos EXCLUSIVAMENTE PIX, com desconto e confirmacao na hora. Cartao de credito e aceito apenas em compras presenciais na loja fisica. A separacao e a emissao da NF sao feitas pelo vendedor apos a confirmacao do PIX.',
     keywords: [
       'pagamento',
       'pix',
