@@ -1,4 +1,5 @@
 {
   "framework": "nextjs",
-  "buildCommand": "npm --prefix ../.. run vercel:build"
+  "installCommand": "cd ../.. && npm install",
+  "buildCommand": "cd ../.. && npm run vercel:build"
 }

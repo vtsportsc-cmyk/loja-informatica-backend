@@ -38,4 +38,4 @@ COPY --from=build /app/apps/app/.next/static ./apps/app/.next/static
 EXPOSE 3000
 USER node
 
-CMD ["node", "apps/app/server.js"]
+CMD ["node", "server.js"]
