@@ -151,3 +151,93 @@ npm run typecheck   # todos os workspaces
 npm test            # vitest (apps/agent) — 88 testes
 npm run db:seed     # semente de agentes e conversa demo
 ```
+
+## 7. n8n — Automação de Workflows (Meta Ads → CRM)
+
+### Arquitetura
+
+```
+Meta Ads (Facebook/Instagram) ──► n8n webhook ──► Validação/spam filter
+                                                        │
+                                          ┌─────────────┼──────────────┐
+                                          ▼             ▼              ▼
+                                   POST /api/leads   POST /api/chat  Evolution API
+                                   (NOVO_LEAD)       (Agente IA)    (WhatsApp)
+                                   tag: MetaAds       contexto       delay 4s
+```
+
+### Infraestrutura Docker
+
+O n8n é servido como container dentro do `docker-compose.yml`:
+
+| Serviço | Porta | Descrição |
+|---|---|---|
+| n8n | **5678** | Interface + webhooks |
+| agent | 3000 | Motor IA (interno ao n8n) |
+| web | 3001 | Next.js (interno ao n8n) |
+| db | 5432 | PostgreSQL compartilhado |
+| redis | 6379 | Fila + sessão |
+
+### Variáveis de ambiente (n8n no `.env` da VPS)
+
+```bash
+# n8n
+N8N_PORT=5678
+N8N_DB_PASSWORD=N8N_DB_PASSWORD_REMOVIDA
+N8N_ENCRYPTION_KEY=N8N_ENCRYPTION_KEY_REMOVIDA
+N8N_BASIC_AUTH_USER=admin
+N8N_BASIC_AUTH_PASSWORD=N8N_ADMIN_PASSWORD_REMOVIDA
+PUBLIC_IP=PUBLIC_IP_REMOVIDO
+
+# Meta Ads (preencher com token do Facebook)
+FB_ACCESS_TOKEN=
+
+# Integração interna
+AGENT_API_KEY=AGENT_API_KEY_CHAVE_VAZADA_REMOVIDA
+EVOLUTION_API_KEY=
+EVOLUTION_INSTANCE=loja
+```
+
+### Acesso
+
+**URL:** `http://PUBLIC_IP_REMOVIDO:5678`
+**Login:** `admin` / `N8N_ADMIN_PASSWORD_REMOVIDA`
+
+### Workflow: Meta Ads Leads → IA → WhatsApp CRM
+
+Arquivo: `n8n/meta-ads-leads-workflow.json`
+Importar via: n8n UI → Settings → Import from File.
+
+**Pipeline:**
+
+1. **Webhook** — escuta `POST /webhook/meta-ads-leads`
+2. **Validar Payload** — filtra eventos Facebook (`object: "page"`, `field: "leadgen"`)
+3. **Buscar Lead (FB Graph API)** — busca `full_name`, `phone_number`, `email`, `ad_name`, `campaign_name`
+4. **Validar & Normalizar** — regex BR (11 dígitos, nonve 9), filtra spam/números de teste
+5. **Inserir Lead** — `POST http://web:3000/api/leads` com status `NOVO_LEAD`, tag `MetaAds`
+6. **Acionar Agente IA** — `POST http://agent:3000/api/chat` com contexto do anúncio
+7. **Delay 4s** — anti-bloqueio WhatsApp
+8. **Enviar WhatsApp** — via Evolution API (`sendText`)
+
+### Setup na VPS
+
+```bash
+cd /root/loja-informatica
+docker compose up -d n8n
+```
+
+O init script (`docker/init-n8n-db.sh`) cria o DB `n8n` automaticamente na primeira execução.
+Se o PostgreSQL já existe, criar manualmente:
+
+```bash
+docker exec loja-informatica-db-1 psql -U loja -d loja -c "CREATE USER n8n WITH PASSWORD 'N8N_DB_PASSWORD_REMOVIDA';"
+docker exec loja-informatica-db-1 psql -U loja -d loja -c "CREATE DATABASE n8n OWNER n8n;"
+docker exec loja-informatica-db-1 psql -U loja -d loja -c "GRANT ALL PRIVILEGES ON DATABASE n8n TO n8n;"
+```
+
+### Próximos passos para ativar
+
+1. Configurar **Facebook Lead Ads** webhook → `http://PUBLIC_IP_REMOVIDO:5678/webhook/meta-ads-leads`
+2. Inserir `FB_ACCESS_TOKEN` no `.env` da VPS (token de Pages do Meta)
+3. Verificar que a Evolution API tem a instância `loja` ativa
+4. Importar o workflow JSON no n8n e ativá-lo
