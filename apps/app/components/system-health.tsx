@@ -149,8 +149,8 @@ function SystemHealthDrawer({
         onClick={onClose}
         aria-hidden
       />
-      <aside className="relative z-10 flex h-full w-full max-w-sm flex-col border-l border-night-700/70 bg-night-900 shadow-pop">
-        <header className="flex items-center justify-between gap-3 border-b border-night-700/70 px-4 py-3">
+      <aside className="relative z-10 flex h-dvh w-full max-w-sm flex-col border-l border-night-700/70 bg-night-900 shadow-pop">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-night-700/70 px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold text-zinc-50">Saúde do Sistema</h2>
             <p className="mt-0.5 text-[10px] text-zinc-500">
@@ -222,7 +222,7 @@ function SystemHealthDrawer({
           )}
         </div>
 
-        <footer className="border-t border-night-700/70 px-4 py-2 text-[10px] text-zinc-500">
+        <footer className="shrink-0 border-t border-night-700/70 px-4 py-2 text-[10px] text-zinc-500">
           {status
             ? `Node ${status.process.node} · up ${status.process.uptimeHuman}`
             : 'Sem dados de telemetria'}
