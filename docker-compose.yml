@@ -1,13 +1,15 @@
 # ============================================================================
 # docker-compose do ecossistema LojaTech.
-#   db   : PostgreSQL (Prisma) - conversas, mensagens, orcamentos e funil de CRM
-#   redis: sessao distribuida do agente (SESSION_STORE=redis)
-#   agent: motor de atendimento (Evolution API WhatsApp, PIX, cartao, CRM, Bling)
-#   web  : Next.js - "Monte seu PC" + Painel CRM multi-atendente
+#   db     : PostgreSQL (Prisma) - conversas, mensagens, orcamentos e funil de CRM
+#   redis  : sessao distribuida do agente (SESSION_STORE=redis)
+#   agent  : motor de atendimento (Evolution API WhatsApp, PIX, cartao, CRM, Bling)
+#   web    : Next.js - "Monte seu PC" + Painel CRM multi-atendente
+#   n8n    : automacao de workflows - Meta Ads leads, integracao CRM + WhatsApp
 # Comandos:
 #   docker compose up --build -d   (sobe tudo)
 #   docker compose down            (derruba)
 #   docker compose logs -f agent   (acompanha logs do agente)
+#   docker compose logs -f n8n     (acompanha logs do n8n)
 # ============================================================================
 
 name: loja-informatica
@@ -22,6 +24,7 @@ services:
       POSTGRES_DB: loja
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./docker/init-n8n-db.sh:/docker-entrypoint-initdb.d/init-n8n-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U loja -d loja"]
       interval: 10s
@@ -81,6 +84,40 @@ services:
       agent:
         condition: service_started
 
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    restart: always
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://${PUBLIC_IP:-PUBLIC_IP_REMOVIDO}:5678
+      - GENERIC_TIMEZONE=America/Sao_Paulo
+      - TZ=America/Sao_Paulo
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=db
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_USER=n8n
+      - DB_POSTGRESDB_PASSWORD=${N8N_DB_PASSWORD:-N8N_DB_PASSWORD_REMOVIDA}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-N8N_ENCRYPTION_KEY_REMOVIDA}
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_ADMIN_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_ADMIN_PASSWORD:-N8N_ADMIN_PASSWORD_REMOVIDA}
+      - N8N_RUNNERS_ENABLED=true
+    volumes:
+      - n8n-data:/home/node/.n8n
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres-data:
   redis-data:
+  n8n-data:

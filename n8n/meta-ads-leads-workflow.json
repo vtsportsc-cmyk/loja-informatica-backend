@@ -1,0 +1,412 @@
+{
+  "name": "Meta Ads Leads → IA → WhatsApp CRM",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meta-ads-leads",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-meta-ads",
+      "name": "Webhook Meta Ads",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "meta-ads-leads"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-object",
+              "leftValue": "={{ $json.body.object }}",
+              "rightValue": "page",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "filter-valid-payload",
+      "name": "Validar Payload Facebook",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const entries = $input.first().json.body.entry || [];\nconst results = [];\n\nfor (const entry of entries) {\n  for (const change of (entry.changes || [])) {\n    if (change.field === 'leadgen' && change.value) {\n      results.push({\n        json: {\n          leadgen_id: change.value.leadgen_id,\n          form_id: change.value.form_id,\n          page_id: entry.id,\n          created_time: change.value.created_time || Math.floor(Date.now() / 1000)\n        }\n      });\n    }\n  }\n}\n\nreturn results.length > 0 ? results : [{ json: { skip: true, reason: 'no_leadgen_changes' } }];"
+      },
+      "id": "extract-leads",
+      "name": "Extrair Lead IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-skip",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEqual"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "filter-skipped",
+      "name": "Tem Lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 220]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://graph.facebook.com/v19.0/{{ $json.leadgen_id }}?access_token={{ $env.FB_ACCESS_TOKEN }}&fields=full_name,phone_number,email,ad_id,ad_name,campaign_id,campaign_name,form_name,created_time",
+        "options": {}
+      },
+      "id": "fetch-lead-details",
+      "name": "Buscar Detalhes Lead (FB API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $input.first().json;\n\n// Extrair telefone\nlet phone = (lead.phone_number || '').replace(/[^0-9+]/g, '');\n\n// Normalizar para formato BR\nif (phone.startsWith('+55')) {\n  phone = phone.substring(3);\n} else if (phone.startsWith('55') && phone.length > 11) {\n  phone = phone.substring(2);\n}\n\n// Remover zeros a esquerda\nphone = phone.replace(/^0+/, '');\n\n// Validar: celular BR tem 11 digitos (DDD + 9XXXXXXXX)\nconst isValidPhone = /^\\d{2}9\\d{8}$/.test(phone);\n\n// Filtrar numeros de teste / spam\nconst spamPatterns = [\n  /^11111111111/,\n  /^00000000000/,\n  /^99999999999/,\n  /^12345678901/\n];\nconst isSpam = spamPatterns.some(p => p.test(phone));\n\n// Validar email se existir\nconst email = (lead.email || '').trim();\nconst isValidEmail = !email || /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email);\n\nconst fullName = (lead.full_name || 'Lead MetaAds').trim();\nconst firstName = fullName.split(' ')[0];\n\nreturn [{\n  json: {\n    valid: isValidPhone && !isSpam && isValidEmail,\n    phone: phone,\n    name: fullName,\n    first_name: firstName,\n    email: email || null,\n    leadgen_id: lead.leadgen_id,\n    ad_id: lead.ad_id || null,\n    ad_name: lead.ad_name || null,\n    campaign_id: lead.campaign_id || null,\n    campaign_name: lead.campaign_name || null,\n    form_name: lead.form_name || null,\n    created_time: lead.created_time,\n    reject_reason: !isValidPhone ? 'invalid_phone' : isSpam ? 'spam_number' : !isValidEmail ? 'invalid_email' : null\n  }\n}];"
+      },
+      "id": "validate-lead",
+      "name": "Validar & Normalizar Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "filter-valid-lead",
+      "name": "Lead Valido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1560, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://web:3000/api/leads",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"phone\": \"+55{{ $json.phone }}\",\n  \"name\": \"{{ $json.name }}\",\n  \"email\": {{ $json.email ? '\"' + $json.email + '\"' : 'null' }},\n  \"status\": \"NOVO_LEAD\",\n  \"source\": \"MetaAds\",\n  \"tags\": [\"MetaAds\", \"{{ $json.campaign_name || 'SemCampanha' }}\"],\n  \"metadata\": {\n    \"leadgen_id\": \"{{ $json.leadgen_id }}\",\n    \"ad_id\": \"{{ $json.ad_id }}\",\n    \"ad_name\": \"{{ $json.ad_name }}\",\n    \"campaign_id\": \"{{ $json.campaign_id }}\",\n    \"campaign_name\": \"{{ $json.campaign_name }}\",\n    \"form_name\": \"{{ $json.form_name }}\"\n  }\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "insert-lead-api",
+      "name": "Inserir Lead via API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 140]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://agent:3000/api/chat",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.AGENT_API_KEY || 'dev_agent_key' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"phone\": \"+55{{ $json.phone }}\",\n  \"message\": \"Olá {{ $json.first_name }}! Vi que você se interessou pelo nosso anúncio. {{ $json.campaign_name ? 'Campanha: ' + $json.campaign_name + '. ' : '' }}Como posso te ajudar?\",\n  \"context\": {\n    \"source\": \"MetaAds\",\n    \"campaign\": \"{{ $json.campaign_name }}\",\n    \"ad\": \"{{ $json.ad_name }}\",\n    \"form\": \"{{ $json.form_name }}\"\n  }\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "trigger-agent",
+      "name": "Acionar Agente IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 140]
+    },
+    {
+      "parameters": {
+        "amount": 4,
+        "unit": "seconds"
+      },
+      "id": "rate-limit-delay",
+      "name": "Delay Anti-Bloqueio (4s)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2220, 140]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://loja-evolution-api:8080/message/sendText/{{ $env.EVOLUTION_INSTANCE || 'loja' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "apikey",
+              "value": "={{ $env.EVOLUTION_API_KEY || '' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"+55{{ $('Validar & Normalizar Lead').first().json.phone }}\",\n  \"text\": \"Olá {{ $('Validar & Normalizar Lead').first().json.first_name }}! 👋\\n\\nVi que você se interessou pelos nossos produtos de informática. Como posso te ajudar?\\n\\n🖥️ Montamos PC sob medida\\n💰 Preços especiais para configurations personalizadas\\n📦 Entrega para todo o Brasil\\n\\nPode me contar o que precisa?\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "send-whatsapp",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2440, 140]
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $('Validar & Normalizar Lead').first().json;\nreturn [{\n  json: {\n    status: 'rejected',\n    phone: lead.phone,\n    reason: lead.reject_reason,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "log-rejected",
+      "name": "Log Rejeitados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 340]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { status: 'skipped', reason: 'no_leadgen_changes', timestamp: new Date().toISOString() } }];"
+      },
+      "id": "log-skipped",
+      "name": "Log Skip",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { status: 'error', message: 'Invalid Facebook payload', timestamp: new Date().toISOString() } }];"
+      },
+      "id": "log-invalid",
+      "name": "Log Invalido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 440]
+    }
+  ],
+  "connections": {
+    "Webhook Meta Ads": {
+      "main": [
+        [
+          {
+            "node": "Validar Payload Facebook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar Payload Facebook": {
+      "main": [
+        [
+          {
+            "node": "Extrair Lead IDs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Invalido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair Lead IDs": {
+      "main": [
+        [
+          {
+            "node": "Tem Lead?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem Lead?": {
+      "main": [
+        [
+          {
+            "node": "Buscar Detalhes Lead (FB API)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Detalhes Lead (FB API)": {
+      "main": [
+        [
+          {
+            "node": "Validar & Normalizar Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar & Normalizar Lead": {
+      "main": [
+        [
+          {
+            "node": "Lead Valido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Valido?": {
+      "main": [
+        [
+          {
+            "node": "Inserir Lead via API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Rejeitados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inserir Lead via API": {
+      "main": [
+        [
+          {
+            "node": "Acionar Agente IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acionar Agente IA": {
+      "main": [
+        [
+          {
+            "node": "Delay Anti-Bloqueio (4s)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delay Anti-Bloqueio (4s)": {
+      "main": [
+        [
+          {
+            "node": "Enviar WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "tags": [
+    {
+      "name": "MetaAds"
+    },
+    {
+      "name": "CRM"
+    },
+    {
+      "name": "WhatsApp"
+    }
+  ]
+}
