@@ -148,7 +148,7 @@ Fluxo do vendedor (funil `AGUARDANDO_NF`): separar estoque físico → emitir NF
 
 ```bash
 npm run typecheck   # todos os workspaces
-npm test            # vitest (apps/agent) — 88 testes
+npm test            # vitest (apps/agent) — 187 testes
 npm run db:seed     # semente de agentes e conversa demo
 ```
 
@@ -180,28 +180,19 @@ O n8n é servido como container dentro do `docker-compose.yml`:
 
 ### Variáveis de ambiente (n8n no `.env` da VPS)
 
-```bash
-# n8n
-N8N_PORT=5678
-N8N_DB_PASSWORD=N8N_DB_PASSWORD_REMOVIDA
-N8N_ENCRYPTION_KEY=N8N_ENCRYPTION_KEY_REMOVIDA
-N8N_BASIC_AUTH_USER=admin
-N8N_BASIC_AUTH_PASSWORD=N8N_ADMIN_PASSWORD_REMOVIDA
-PUBLIC_IP=PUBLIC_IP_REMOVIDO
+As variáveis do n8n (`N8N_PORT`, `N8N_DB_PASSWORD`, `N8N_ENCRYPTION_KEY`,
+`N8N_ADMIN_USER`, `N8N_ADMIN_PASSWORD`, `WEBHOOK_URL`/`PUBLIC_IP`,
+`AGENT_API_KEY`, `FB_ACCESS_TOKEN`) são **secretas e ficam no `.env`** — veja o
+`.env.example` para a lista completa. Nenhum segredo é versionado neste repositório.
 
-# Meta Ads (preencher com token do Facebook)
-FB_ACCESS_TOKEN=
-
-# Integração interna
-AGENT_API_KEY=AGENT_API_KEY_CHAVE_VAZADA_REMOVIDA
-EVOLUTION_API_KEY=
-EVOLUTION_INSTANCE=loja
-```
+> **Importante:** `N8N_ENCRYPTION_KEY` é a chave que criptografa as credenciais
+> salvas dentro do n8n. Se ela for trocada, as credenciais dos workflows precisam
+> ser re-inseridas pela interface do n8n.
 
 ### Acesso
 
-**URL:** `http://PUBLIC_IP_REMOVIDO:5678`
-**Login:** `admin` / `N8N_ADMIN_PASSWORD_REMOVIDA`
+A interface e o login de admin do n8n dependem de `N8N_HOST`, `N8N_PORT`,
+`N8N_ADMIN_USER` e `N8N_ADMIN_PASSWORD` definidos no `.env` da VPS.
 
 ### Workflow: Meta Ads Leads → IA → WhatsApp CRM
 
@@ -226,18 +217,18 @@ cd /root/loja-informatica
 docker compose up -d n8n
 ```
 
-O init script (`docker/init-n8n-db.sh`) cria o DB `n8n` automaticamente na primeira execução.
-Se o PostgreSQL já existe, criar manualmente:
+O init script (`docker/init-n8n-db.sh`) cria o DB `n8n` automaticamente na primeira execução (a senha é lida de `N8N_DB_PASSWORD` no `.env`).
+Se o PostgreSQL já existe, criar manualmente usando o valor de `N8N_DB_PASSWORD` do `.env`:
 
 ```bash
-docker exec loja-informatica-db-1 psql -U loja -d loja -c "CREATE USER n8n WITH PASSWORD 'N8N_DB_PASSWORD_REMOVIDA';"
+docker exec loja-informatica-db-1 psql -U loja -d loja -c "CREATE USER n8n WITH PASSWORD '$N8N_DB_PASSWORD';"
 docker exec loja-informatica-db-1 psql -U loja -d loja -c "CREATE DATABASE n8n OWNER n8n;"
 docker exec loja-informatica-db-1 psql -U loja -d loja -c "GRANT ALL PRIVILEGES ON DATABASE n8n TO n8n;"
 ```
 
 ### Próximos passos para ativar
 
-1. Configurar **Facebook Lead Ads** webhook → `http://PUBLIC_IP_REMOVIDO:5678/webhook/meta-ads-leads`
+1. Configurar **Facebook Lead Ads** webhook → `http://${PUBLIC_IP}:${N8N_PORT}/webhook/meta-ads-leads`
 2. Inserir `FB_ACCESS_TOKEN` no `.env` da VPS (token de Pages do Meta)
 3. Verificar que a Evolution API tem a instância `loja` ativa
 4. Importar o workflow JSON no n8n e ativá-lo
